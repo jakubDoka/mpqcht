@@ -1,0 +1,26 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+arc-swap = "1.7.1"
+axum = "0.7.5"
+axum-server = { version = "0.6.0", features = ["tls-rustls"], optional = true }
+futures = "0.3.30"
+p256 = { version = "0.13.2", default-features = false, features = ["ecdsa"] }
+rusqlite = "0.31.0"
+serde = { version = "1.0.203", features = ["derive", "rc"] }
+sha2 = "0.10.8"
+tokio = { version = "1.38.0", features = ["macros", "net"] }
+toml = { version = "0.8.14" }
+tower-service = "0.3.2"
+trained-compression = { version = "0.1.0", path = "../trained-compression" }
+notify = { version = "6.1.1", optional = true }
+
+[features]
+default = ["hot-reload"]
+tls = ["axum-server"]
+gzip = []
+hot-reload = ["notify"]
+

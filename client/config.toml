@@ -1,0 +1,11 @@
+name = "mpqcht"
+roots = []
+	
+roles = []
+
+[[channels]] 
+id = 0
+name = "channello"
+group = "grouplo"
+roles = []
+default_permissions = { id = 0 }

@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+	<link rel="stylesheet" href="index.css">
+</head>
+
+<body data-env="debug" style="margin: 0; display: flex; background-color: var(--black)">
+	<div id="login" hidden>
+		<form onsubmit="loginHandler(this)">
+			<input type="password" name="mnemonic" placeholder="mnemonic.." required>
+			<input type="submit" value="login">
+		</form>
+	</div>
+	<div id="servers" hidden>
+		<nav-bar></nav-bar>
+		<channel-list></channel-list>
+		<chat-view style="flex: 1"></chat-view>
+	</div>
+	<div id="add-server" class="poppup" style="
+		position: absolute;
+		backdrop-filter: blur(5px);
+	">
+		<form onsubmit="addServerHandler(this)">
+			<input type="url" name="url" placeholder="https://..." required>
+			<input type="text" name="username" placeholder="username">
+			<input type="submit" value="add">
+		</form>
+	</div>
+</body>
+
+<template id="chat-view" static>
+	<style>
+		* {
+			color: var(--light);
+		}
+
+		::placeholder {
+			color: var(--medium);
+		}
+	</style>
+
+	<div style="
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+	">
+		<div style="
+			padding: var(--medium-gap);
+		">
+			fooba
+		</div>
+		<hr style="border: none; border-top: 1px solid var(--medium);
+			margin: 0px var(--small-gap);">
+		<div style="
+			flex: 1;
+			position: relative;
+			padding: var(--medium-gap);
+		">
+			akjsad
+		</div>
+		<div style="
+			background-color: var(--dark);
+			padding: var(--medium-gap);
+			margin: var(--medium-gap);
+			border-radius: var(--medium-gap);
+			display: flex;
+			gap: var(--small-gap);
+		">
+			<circle-add width="21"></circle-add>
+			<textarea rows=1 placeholder="Type something..." style="
+				flex: 1;
+				outline: none;
+				border: none;
+				resize: none;
+				background-color: var(--dark);
+				font-family: inherit;
+				font-size: 16px;
+			"></textarea>
+		</div>
+	</div>
+</template>
+
+<template id="channel-select" static>
+	<link rel="stylesheet" href="index.css">
+	<button style="
+		color: var(--light);
+		background: var(--dark);
+		padding: var(--small-gap);
+		border-radius: var(--small-gap);
+		text-align: left;
+		width: 100%;
+	">foobar</button>
+</template>
+
+<template id="channel-group" static>
+	<section>
+		<div style="display: flex; gap: var(--small-gap)">
+			<arrow-down width="16"></arrow-down>
+			<div>group</div>
+		</div>
+		<div style="
+			margin-top: var(--small-gap);
+			display: flex;
+			flex-direction: column;
+			gap: var(--small-gap);
+		">
+		</div>
+	</section>
+</template>
+
+<template id="channel-list">
+	<style>
+		* {
+			color: var(--light);
+		}
+	</style>
+
+	<div style="
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+		width: 250px;
+		border-right: 1px solid var(--medium);
+		scrollbar-width: none;
+		overflow-y: scroll;
+		backgound: red;
+		border-top-right-radius: var(--medium-gap);
+		border-bottom-right-radius: var(--medium-gap);
+	">
+		<div id="name" style="
+			font-size: 20px;
+			padding: var(--medium-gap);
+		">foo</div>
+		<hr style="border: none; border-top: 1px solid var(--medium); margin: 0px var(--small-gap);">
+		<div id="groups" style="
+			display: flex;
+			flex-direction: column;
+			gap: var(--medium-gap);
+			padding: var(--medium-gap) var(--small-gap);
+		">
+		</div>
+	</div>
+</template>
+
+<template id="nav-bar" static>
+	<link rel="stylesheet" href="index.css">
+
+	<style>
+		nav {
+			scrollbar-width: none;
+		}
+	</style>
+
+	<nav style="
+		background-color: var(--dark);
+		color: var(--light);
+		height: calc(100% - var(--small-gap) * 2);
+		padding: var(--small-gap);
+		display: flex;
+		flex-direction: column;
+		gap: var(--small-gap);
+		overflow-y: scroll;
+		border-top-right-radius: var(--medium-gap);
+		border-bottom-right-radius: var(--medium-gap);
+	">
+		<button><mpqcht-logo width="32" height="32"></mpqcht-logo></button>
+		<hr style="border: none; border-top: 1px solid var(--medium); margin: 0px;">
+		<div id="server-list" style="
+			display: flex;
+			flex: 1;
+			flex-direction: column;
+			gap: var(--small-gap);
+		">
+		</div>
+		<hr style="border: none; border-top: 1px solid var(--medium); margin: 0px;">
+		<button><mpqcht-add width="32" height="32"></mpqcht-add></button>
+	</nav>
+</template>
+
+<template id="circle-add" alias="bit-mage" dim="7" bits="
+	  XXX  
+	 XX XX 
+	XXX XXX
+	X     X
+	XXX XXX
+	 XX XX 
+	  XXX
+"></template>
+
+<template id="arrow-down" alias="bit-mage" dim="5" bits="
+	X   X
+	 X X 
+	  X
+"></template>
+
+
+<template id="mpqcht-logo" alias="bit-mage" bits="
+	  XXXX  
+	 XXXXXX 
+	XXXXXXXX
+	X XXXX X
+	X  XX  X
+	X  XX  X
+	 XXXXXX 
+	  X  X
+"></template>
+
+<template id="mpqcht-add" alias="bit-mage" bits="
+	   XX   
+	    X   
+	   XX   
+	X XXXXXX
+	XXXXXX X
+	   XX   
+	   X    
+	   XX
+"></template>
+
+<template id="server-select" static>
+	<link rel="stylesheet" href="index.css">
+	<style>
+	</style>
+
+	<button><mpqcht-logo width="32" height="32"></mpqcht-logo></button>
+</template>
+
+<script type="module" src="index.js"></script>
+
+</html>
