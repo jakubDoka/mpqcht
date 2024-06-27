@@ -1,11 +1,20 @@
-name = "mpqcht"
-roots = []
+hostname = "localhost"
+roots = [
+	"02e9e11f4e58697c85737129c7badba89de7da00716a16caf9044002a6b5222966"
+]
 	
 roles = []
 
 [[channels]] 
 id = 0
 name = "channello"
+group = "grouplo"
+roles = []
+default_permissions = { id = 0 }
+
+[[channels]] 
+id = 1
+name = "channello2"
 group = "grouplo"
 roles = []
 default_permissions = { id = 0 }

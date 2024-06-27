@@ -24,6 +24,13 @@ body>div {
 	height: 100%;
 	width: 100%;
 	display: flex;
+
+}
+
+body>div.poppup {
+	top: 0;
+	position: absolute;
+	backdrop-filter: blur(5px);
 }
 
 form {
@@ -37,6 +44,11 @@ form {
 
 	>input {
 		border-radius: var(--small-gap);
+	}
+
+	>input:hover:not(:active) {
+		background: var(--light);
+		color: var(--black);
 	}
 }
 
@@ -68,4 +80,19 @@ input {
 	background: var(--black);
 	outline: none;
 	border: none;
+}
+
+.toast {
+	position: absolute;
+	height: fit-content;
+	width: fit-content;
+	transition: transform 0.4s;
+	transform: scale(0);
+	z-index: 1;
+	right: 0;
+	background: var(--dark);
+	padding: var(--small-gap);
+	margin: var(--small-gap);
+	max-width: 200px;
+	overflow-wrap: break-word;
 }

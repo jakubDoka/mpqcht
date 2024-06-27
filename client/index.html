@@ -5,31 +5,74 @@
 	<link rel="stylesheet" href="index.css">
 </head>
 
-<body data-env="debug" style="margin: 0; display: flex; background-color: var(--black)">
+<body data-env="debug" style="margin: 0; background-color: var(--black); overflow: hidden">
 	<div id="login" hidden>
-		<form onsubmit="loginHandler(this)">
-			<input type="password" name="mnemonic" placeholder="mnemonic.." required>
+		<form onsubmit="loginHandler(this); return false;">
+			<input type="password" autocomplete="current-password" name="mnemonic" placeholder="mnemonic..." required
+				oninput="validateMnemonic(this)">
 			<input type="submit" value="login">
 		</form>
 	</div>
 	<div id="servers" hidden>
 		<nav-bar></nav-bar>
 		<channel-list></channel-list>
-		<chat-view style="flex: 1"></chat-view>
+		<channel-view style="flex: 1"></channel-view>
 	</div>
-	<div id="add-server" class="poppup" style="
-		position: absolute;
-		backdrop-filter: blur(5px);
-	">
-		<form onsubmit="addServerHandler(this)">
-			<input type="url" name="url" placeholder="https://..." required>
+	<div id="add-server" hidden class="poppup">
+		<form onsubmit="addServerHandler(this); event.preventDefault(); return false;"
+			style="width: min(400px, calc(100% - 40px))">
+			<input type="url" name="url" placeholder="https://some.server.pq" required>
 			<input type="text" name="username" placeholder="username">
 			<input type="submit" value="add">
+			<input type="button" value="cancel" onclick="hidePoppup('add-server')">
+
+			<div id="add-server-hint" hidden style="
+				display: flex;
+				align-items: center;
+				gap: var(--small-gap);
+			">
+				<mpqcht-bulb width="24" height="27"></mpqcht-bulb>
+				<div>
+					Your public key is
+					<span id="add-server-pubkey" style="
+						word-break: break-all; color: var(--white)
+					">[your public key as hex]</span>
+					. If you can edit the server config, add it to the list
+					of roots. Oterwise, a member with invite
+					permission has to allow the key.
+				</div>
+			</div>
 		</form>
 	</div>
+	<div id="profile-settings" hidden class="poppup">
+		<div style="
+			background-color: var(--dark);
+			padding: var(--medium-gap);
+			border-radius: var(--small-gap);
+			margin: auto;
+			display: flex;
+			flex-direction: column;
+			gap: var(--small-gap);
+		">
+			<div>Public key: <span id="profile-settings-pubkey">[my public key as hex]</span></div>
+			<input type="button" value="back" onclick="hidePoppup('profile-settings')">
+		</div>
+	</div>
+	<div id="toasts" style="position: absolute; width: 0px; height: 0px"></div>
 </body>
 
-<template id="chat-view" static>
+<template id="channel-message" static>
+	<div id="content">messaga</div>
+</template>
+
+<template id="channel-message-group" static>
+	<div>
+		<div id="author">userba</div>
+		<div id="messages"></div>
+	</div>
+</template>
+
+<template id="channel-view">
 	<style>
 		* {
 			color: var(--light);
@@ -45,19 +88,20 @@
 		flex-direction: column;
 		height: 100%;
 	">
-		<div style="
+		<div id="name" style="
 			padding: var(--medium-gap);
 		">
 			fooba
 		</div>
 		<hr style="border: none; border-top: 1px solid var(--medium);
 			margin: 0px var(--small-gap);">
-		<div style="
-			flex: 1;
-			position: relative;
-			padding: var(--medium-gap);
-		">
-			akjsad
+		<div style="position: relative; flex: 1; overflow-y: auto;">
+			<div id="message-list" style="
+				flex: 1;
+				position: absolute;
+				padding: var(--medium-gap);
+			">
+			</div>
 		</div>
 		<div style="
 			background-color: var(--dark);
@@ -68,7 +112,8 @@
 			gap: var(--small-gap);
 		">
 			<circle-add width="21"></circle-add>
-			<textarea rows=1 placeholder="Type something..." style="
+			<textarea oninput="messageInputHandler(this)" onkeydown="messageKeyDownHandler(this, event)" rows=1
+				placeholder="Type something..." style="
 				flex: 1;
 				outline: none;
 				border: none;
@@ -81,25 +126,34 @@
 	</div>
 </template>
 
-<template id="channel-select" static>
+<template id="channel-select">
 	<link rel="stylesheet" href="index.css">
-	<button style="
-		color: var(--light);
-		background: var(--dark);
-		padding: var(--small-gap);
-		border-radius: var(--small-gap);
-		text-align: left;
-		width: 100%;
-	">foobar</button>
+	<style>
+		button:is(.selected, :hover:not(:active)) {
+			color: var(--dark);
+			background: var(--light);
+		}
+
+		button {
+			color: var(--light);
+			background: var(--dark);
+			padding: var(--small-gap);
+			border-radius: var(--small-gap);
+			text-align: left;
+			width: 100%;
+		}
+	</style>
+
+	<button id="name" onclick="selectChannelHandler(this)">foobar</button>
 </template>
 
 <template id="channel-group" static>
 	<section>
 		<div style="display: flex; gap: var(--small-gap)">
 			<arrow-down width="16"></arrow-down>
-			<div>group</div>
+			<div id="name">group</div>
 		</div>
-		<div style="
+		<div id="channels" style="
 			margin-top: var(--small-gap);
 			display: flex;
 			flex-direction: column;
@@ -143,7 +197,7 @@
 	</div>
 </template>
 
-<template id="nav-bar" static>
+<template id="nav-bar">
 	<link rel="stylesheet" href="index.css">
 
 	<style>
@@ -174,46 +228,75 @@
 		">
 		</div>
 		<hr style="border: none; border-top: 1px solid var(--medium); margin: 0px;">
-		<button><mpqcht-add width="32" height="32"></mpqcht-add></button>
+		<button onclick="showPoppup('add-server')"><mpqcht-add width="32" height="32"></mpqcht-add></button>
+		<button onclick="showPoppup('profile-settings')" style="padding: calc(var(--medium-gap) + 1px)">
+			<mpqcht-profile-settings width="30" height="30"></mpqcht-profile-settings>
+		</button>
 	</nav>
 </template>
 
 <template id="circle-add" alias="bit-mage" dim="7" bits="
-	  XXX  
-	 XX XX 
+	  XXX
+	 XX XX
 	XXX XXX
 	X     X
 	XXX XXX
-	 XX XX 
+	 XX XX
 	  XXX
 "></template>
 
 <template id="arrow-down" alias="bit-mage" dim="5" bits="
 	X   X
-	 X X 
+	 X X
 	  X
 "></template>
 
 
 <template id="mpqcht-logo" alias="bit-mage" bits="
-	  XXXX  
-	 XXXXXX 
+	  XXXX
+	 XXXXXX
 	XXXXXXXX
 	X XXXX X
 	X  XX  X
 	X  XX  X
-	 XXXXXX 
+	 XXXXXX
 	  X  X
 "></template>
 
 <template id="mpqcht-add" alias="bit-mage" bits="
-	   XX   
-	    X   
-	   XX   
+	   XX
+	    X
+	   XX
 	X XXXXXX
 	XXXXXX X
-	   XX   
-	   X    
+	   XX
+	   X
+	   XX
+"></template>
+
+
+<template id="mpqcht-profile-settings" alias="bit-mage" bits="
+	    XX
+	 XX XX XX
+	 XXXXXXXX
+	  XXXXXX
+	XXXX  XXXX
+	XXXX  XXXX
+	  XXXXXX
+	 XXXXXXXX
+	 XX XX XX
+	    XX
+"></template>
+
+<template id="mpqcht-bulb" alias="bit-mage" bits="
+	  XXXX
+	 X    X
+	X   XX X
+	X    X X
+	X      X
+	 X XX X
+	  XXXX
+	  XXXX
 	   XX
 "></template>
 

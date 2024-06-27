@@ -31,7 +31,7 @@ pub fn derive_keys(mnemonic: String) -> Result<UserKeys, Error> {
 
     Ok(UserKeys {
         vault: vault.to_vec(),
-        vkey: vkey.to_encoded_point(true).as_bytes().to_vec(),
+        vkey: vkey.to_encoded_point(false).as_bytes().to_vec(),
         skey: skey.to_bytes().to_vec(),
     })
 }

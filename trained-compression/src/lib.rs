@@ -10,8 +10,7 @@ mod trained;
 #[cfg(test)]
 #[test]
 fn main() {
-    let mut data = std::fs::read_to_string("dataset.txt").unwrap();
-    data = data.split_whitespace().intersperse(" ").collect();
+    let data = std::fs::read_to_string("dataset.txt").unwrap();
 
     let now = std::time::Instant::now();
     let compressed = compress(data.as_bytes());
