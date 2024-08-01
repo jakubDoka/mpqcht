@@ -1,6 +1,8 @@
-hostname = "localhost"
+hostname = "mpqcht.mlokis.tech"
 roots = [
-	"02e9e11f4e58697c85737129c7badba89de7da00716a16caf9044002a6b5222966"
+	"02e9e11f4e58697c85737129c7badba89de7da00716a16caf9044002a6b5222966",
+	"0345ae1fa1e046e264d8ac3d849df16ea6d9a8fd505cf320202c664f6dffce364e",
+	"03811f8505552278403036066b1ec110752ac80109a6caab5d050134fa01591ae7",
 ]
 	
 roles = []
@@ -13,8 +15,16 @@ roles = []
 default_permissions = { id = 0 }
 
 [[channels]] 
-id = 1
-name = "channello2"
+id = 2
+name = "channello3"
 group = "grouplo"
 roles = []
 default_permissions = { id = 0 }
+
+[[channels]]
+id = 3
+name = "voicechat"
+group = "voices"
+roles = []
+default_permissions = { id = 0 }
+voice = { max_participants = 10 }

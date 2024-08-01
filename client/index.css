@@ -1,23 +1,42 @@
 html {
 	--small-gap: 5px;
 	--medium-gap: 10px;
+
+	color: var(--font);
 }
 
 html[data-theme=dark] {
-	--white: #F7F7F7;
-	--light: #FFEBB3;
-	--bright: #FF8100;
-	--medium: #99450B;
-	--dark: #420000;
-	--black: #1C1B00;
+	--primary: #2c254f;
+	--secondary: #594b9e;
+	--tertiary: #8874ee;
+
+	--neutral: #f6b248;
+	--success: #c2f353;
+	--warning: #cc931e;
+	--error: #d64e3c;
+
+	--font: #EDEDED;
 }
 
 * {
-	color: var(--light);
-
 	[hidden] {
 		display: none !important;
 	}
+
+	scrollbar-color: var(--secondary) var(--primary);
+}
+
+button[comp=channel-select]:is(.selected, :hover:not(:active)) {
+	color: var(--primary);
+	background: var(--neutral);
+}
+
+button[comp=channel-select] {
+	background: var(--secondary);
+	padding: var(--small-gap);
+	border-radius: var(--small-gap);
+	text-align: left;
+	width: 100%;
 }
 
 body>div {
@@ -35,7 +54,7 @@ body>div.poppup {
 
 form {
 	margin: auto;
-	background: var(--dark);
+	background: var(--secondary);
 	display: flex;
 	gap: var(--small-gap);
 	padding: var(--small-gap);
@@ -47,39 +66,111 @@ form {
 	}
 
 	>input:hover:not(:active) {
-		background: var(--light);
-		color: var(--black);
+		background: var(--neutral);
 	}
 }
 
 ::placeholder {
-	color: var(--medium);
+	color: var(--tertiary);
 }
 
 button {
-	background: var(--black);
+	background: var(--primary);
 	border: none;
 	padding: var(--medium-gap);
 	border-radius: var(--medium-gap);
-
-	>* {
-		color: var(--light);
-	}
+	color: var(--font);
 }
 
 button:hover:not(:active) {
-	background: var(--light);
-
-	>* {
-		color: var(--black);
-	}
+	background: var(--neutral);
+	color: var(--primary);
 }
 
 input {
 	padding: var(--small-gap);
-	background: var(--black);
+	background: var(--primary);
 	outline: none;
 	border: none;
+}
+
+[comp=voice-view] {
+	button {
+		padding: 0;
+		border-radius: 0;
+		color: var(--font);
+		background: none;
+	}
+
+	button:hover:not(:active) {
+		background: none;
+		color: var(--error);
+	}
+
+	button.disabled {
+		color: var(--error);
+		background: none;
+		padding: 0;
+	}
+
+	button.disabled:hover:not(:active) {
+		background: none;
+		color: var(--font);
+	}
+}
+
+[comp=voice-pane] {
+	--width: 250px;
+	--height: 175px;
+	--outline-time: 0.5s;
+
+	width: var(--width);
+	height: var(--height);
+	display: flex;
+	background: var(--neutral);
+	overflow: hidden;
+	border-radius: var(--medium-gap);
+	transition:
+		outline var(--outline-time) ease-out,
+		outline-offset var(--outline-time) ease-out;
+	outline: 0px solid transparent;
+	outline-offset: 6px;
+	color: var(--primary);
+
+	video {
+		width: var(--width);
+		height: var(--height);
+		border-radius: var(--medium-gap);
+	}
+
+	svg.hidden {
+		opacity: 0;
+	}
+}
+
+[comp=voice-pane].has-video {
+	color: var(--font);
+}
+
+[comp=voice-pane].talking {
+	--outline-time: 0.03s;
+
+	transition:
+		outline var(--outline-time) ease-in,
+		outline-offset var(--outline-time) ease-in;
+	outline: 6px solid var(--tertiary);
+	outline-offset: 0px;
+}
+
+button.toggle-voice {
+	background: none;
+	border-radius: 0;
+	color: var(--font);
+}
+
+button.toggle-voice:hover:not(:active) {
+	color: var(--neutral);
+	background: none;
 }
 
 .toast {
@@ -90,7 +181,7 @@ input {
 	transform: scale(0);
 	z-index: 1;
 	right: 0;
-	background: var(--dark);
+	background: var(--error);
 	padding: var(--small-gap);
 	margin: var(--small-gap);
 	max-width: 200px;

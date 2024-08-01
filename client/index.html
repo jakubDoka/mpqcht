@@ -1,11 +1,13 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html charset="utf-8" lang="en" data-theme="dark">
 
 <head>
 	<link rel="stylesheet" href="index.css">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>mpqcht</title>
 </head>
 
-<body data-env="debug" style="margin: 0; background-color: var(--black); overflow: hidden">
+<body data-env="debug" style="margin: 0; background-color: var(--primary); overflow: hidden">
 	<div id="login" hidden>
 		<form onsubmit="loginHandler(this); return false;">
 			<input type="password" autocomplete="current-password" name="mnemonic" placeholder="mnemonic..." required
@@ -14,9 +16,10 @@
 		</form>
 	</div>
 	<div id="servers" hidden>
-		<nav-bar></nav-bar>
-		<channel-list></channel-list>
-		<channel-view style="flex: 1"></channel-view>
+		<wbr comp="nav-bar">
+		<wbr comp="channel-list">
+		<wbr comp="channel-view">
+		<wbr comp="voice-view" hidden>
 	</div>
 	<div id="add-server" hidden class="poppup">
 		<form onsubmit="addServerHandler(this); event.preventDefault(); return false;"
@@ -24,14 +27,14 @@
 			<input type="url" name="url" placeholder="https://some.server.pq" required>
 			<input type="text" name="username" placeholder="username">
 			<input type="submit" value="add">
-			<input type="button" value="cancel" onclick="hidePoppup('add-server')">
+			<input type="button" value="cancel" onmousedown="hidePoppup('add-server')">
 
 			<div id="add-server-hint" hidden style="
 				display: flex;
 				align-items: center;
 				gap: var(--small-gap);
 			">
-				<mpqcht-bulb width="24" height="27"></mpqcht-bulb>
+				<wbr comp="mpqcht-bulb" width="24" height="27">
 				<div>
 					Your public key is
 					<span id="add-server-pubkey" style="
@@ -46,7 +49,7 @@
 	</div>
 	<div id="profile-settings" hidden class="poppup">
 		<div style="
-			background-color: var(--dark);
+			background-color: var(--secondary);
 			padding: var(--medium-gap);
 			border-radius: var(--small-gap);
 			margin: auto;
@@ -55,70 +58,167 @@
 			gap: var(--small-gap);
 		">
 			<div>Public key: <span id="profile-settings-pubkey">[my public key as hex]</span></div>
-			<input type="button" value="back" onclick="hidePoppup('profile-settings')">
+			<input type="button" value="back" onmousedown="hidePoppup('profile-settings')">
 		</div>
 	</div>
 	<div id="toasts" style="position: absolute; width: 0px; height: 0px"></div>
+	<div id="request-activation" hidden style="
+		z-index: 1;
+		position: absolute;
+		left: 0; top: 0; right: 0; bottom: 0;
+		background: var(--secondary);
+	">
+		<button kb="k" id="request-activation-btn" style="
+			margin: auto;
+		">Click to hear sound</button>
+	</div>
+	<div id="scratch-space" hidden></div>
 </body>
 
+<template id="voice-pane">
+	<div style="position: relative;">
+		<div id="pfp" style="
+			margin: auto;
+			display: flex;
+			color: var(--primary);
+		">
+			<wbr comp="mpqcht-logo" height="64px">
+		</div>
+		<video id="video" hidden autoplay></video>
+		<audio id="audio" autoplay></audio>
+		<div id="name" style="
+			position: absolute;
+			left: var(--small-gap);
+			bottom: calc(var(--small-gap) / 2);
+		">foobar</div>
+		<wbr id="muted" comp="mpqcht-microphone-disabled" height="18" style="
+			position: absolute;
+			bottom: var(--small-gap);
+			right: var(--small-gap);
+		">
+	</div>
+</template>
+
+<template id="voice-view">
+	<div comp="voice-view" style="
+		padding: var(--medium-gap);
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		position: relative;
+	">
+		<button id="back-to-chat" class="toggle-voice" style="
+			position: absolute;
+			right: 0;
+			top: 0;
+			padding: var(--medium-gap);
+		"><wbr comp="mpqcht-chat-bubble" height="18px"></button>
+		<div id="voice-panes" style="
+				flex: 1;
+				display: flex;
+				justify-content: center;
+				flex-wrap: wrap;
+				gap: var(--medium-gap);
+				padding-bottom: var(--medium-gap);
+				align-content: center;
+			">
+		</div>
+		<div style="display: flex">
+			<div style="
+				background-color: var(--secondary);
+				padding: var(--medium-gap);
+				border-radius: var(--medium-gap);
+				display: flex;
+				gap: var(--medium-gap);
+			">
+				<button kb="tc" class="disabled" onmousedown="toggleCam(this)">
+					<wbr comp="mpqcht-camera" height="27px" hidden>
+					<wbr comp="mpqcht-camera-disabled" height="27px">
+				</button>
+				<button kb="tm" class="disabled" onmousedown="toggleMic(this)">
+					<wbr comp="mpqcht-microphone" height="27px" hidden>
+					<wbr comp="mpqcht-microphone-disabled" height="27px">
+				</button>
+				<button kb="hu" id="hang-up" class="disabled" onmousedown="hangUp()">
+					<wbr comp="mpqcht-hang-up" height="27px">
+				</button>
+			</div>
+		</div>
+	</div>
+</template>
+
 <template id="channel-message" static>
-	<div id="content">messaga</div>
+	<div id="content" style="word-break: break-word;">messaga</div>
 </template>
 
 <template id="channel-message-group" static>
 	<div>
-		<div id="author">userba</div>
-		<div id="messages"></div>
+		<div id="author" style="color: var(--neutral)">userba</div>
+		<div id="messages" style="padding-left: var(--small-gap)"></div>
 	</div>
 </template>
 
 <template id="channel-view">
-	<style>
-		* {
-			color: var(--light);
-		}
-
-		::placeholder {
-			color: var(--medium);
-		}
-	</style>
-
 	<div style="
 		display: flex;
+		flex: 1;
 		flex-direction: column;
 		height: 100%;
+		position: relative;
 	">
-		<div id="name" style="
+		<div style="
 			padding: var(--medium-gap);
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
 		">
-			fooba
-		</div>
-		<hr style="border: none; border-top: 1px solid var(--medium);
-			margin: 0px var(--small-gap);">
-		<div style="position: relative; flex: 1; overflow-y: auto;">
-			<div id="message-list" style="
-				flex: 1;
-				position: absolute;
-				padding: var(--medium-gap);
+			<div id="name">fooba</div>
+			<button id="join-voice" class="toggle-voice" style="
+				padding: 0;
 			">
+				<wbr comp="mpqcht-sound" height="21">
+			</button>
+		</div>
+		<hr style="border: none; border-top: 1px solid var(--tertiary);
+			margin: 0px var(--medium-gap);">
+		<div style="
+			position: relative;
+			flex: 1;
+		">
+			<div style="
+				position: absolute;
+				top: 0; left: 0; right: 0; bottom: 0;
+				display: flex;
+				flex-direction: column;
+				overflow-y: auto;
+			">
+				<div id="message-list" style="
+					flex: 1;
+					display: flex;
+					flex-direction: column;
+					justify-content: flex-end;
+					padding: var(--medium-gap);
+					padding-bottom: 0;
+				">
+				</div>
 			</div>
 		</div>
 		<div style="
-			background-color: var(--dark);
+			background-color: var(--secondary);
 			padding: var(--medium-gap);
 			margin: var(--medium-gap);
 			border-radius: var(--medium-gap);
 			display: flex;
 			gap: var(--small-gap);
 		">
-			<circle-add width="21"></circle-add>
+			<wbr comp="circle-add" width="21">
 			<textarea oninput="messageInputHandler(this)" onkeydown="messageKeyDownHandler(this, event)" rows=1
 				placeholder="Type something..." style="
 				flex: 1;
 				outline: none;
 				border: none;
 				resize: none;
-				background-color: var(--dark);
+				background-color: var(--secondary);
 				font-family: inherit;
 				font-size: 16px;
 			"></textarea>
@@ -127,30 +227,13 @@
 </template>
 
 <template id="channel-select">
-	<link rel="stylesheet" href="index.css">
-	<style>
-		button:is(.selected, :hover:not(:active)) {
-			color: var(--dark);
-			background: var(--light);
-		}
-
-		button {
-			color: var(--light);
-			background: var(--dark);
-			padding: var(--small-gap);
-			border-radius: var(--small-gap);
-			text-align: left;
-			width: 100%;
-		}
-	</style>
-
-	<button id="name" onclick="selectChannelHandler(this)">foobar</button>
+	<button id="name" onmousedown="selectChannelHandler(this)">foobar</button>
 </template>
 
 <template id="channel-group" static>
 	<section>
 		<div style="display: flex; gap: var(--small-gap)">
-			<arrow-down width="16"></arrow-down>
+			<wbr comp="arrow-down" width="16">
 			<div id="name">group</div>
 		</div>
 		<div id="channels" style="
@@ -164,18 +247,14 @@
 </template>
 
 <template id="channel-list">
-	<style>
-		* {
-			color: var(--light);
-		}
-	</style>
-
 	<div style="
 		display: flex;
 		flex-direction: column;
-		height: 100%;
+		height: calc(100% - var(--medium-gap) * 2 - 3px * 2);
 		width: 250px;
-		border-right: 1px solid var(--medium);
+		margin: var(--medium-gap) 0px;
+		border: 3px solid var(--secondary);
+		border-left: none;
 		scrollbar-width: none;
 		overflow-y: scroll;
 		backgound: red;
@@ -186,7 +265,7 @@
 			font-size: 20px;
 			padding: var(--medium-gap);
 		">foo</div>
-		<hr style="border: none; border-top: 1px solid var(--medium); margin: 0px var(--small-gap);">
+		<hr style="border: none; border-top: 1px solid var(--tertiary); margin: 0px var(--small-gap);">
 		<div id="groups" style="
 			display: flex;
 			flex-direction: column;
@@ -198,17 +277,9 @@
 </template>
 
 <template id="nav-bar">
-	<link rel="stylesheet" href="index.css">
-
-	<style>
-		nav {
-			scrollbar-width: none;
-		}
-	</style>
-
 	<nav style="
-		background-color: var(--dark);
-		color: var(--light);
+		background-color: var(--secondary);
+		color: var(--neutral);
 		height: calc(100% - var(--small-gap) * 2);
 		padding: var(--small-gap);
 		display: flex;
@@ -217,9 +288,10 @@
 		overflow-y: scroll;
 		border-top-right-radius: var(--medium-gap);
 		border-bottom-right-radius: var(--medium-gap);
+		scrollbar-width: none;
 	">
-		<button><mpqcht-logo width="32" height="32"></mpqcht-logo></button>
-		<hr style="border: none; border-top: 1px solid var(--medium); margin: 0px;">
+		<button><wbr comp="mpqcht-logo" width="32" height="32"></button>
+		<hr style="border: none; border-top: 1px solid var(--tertiary); margin: 0px;">
 		<div id="server-list" style="
 			display: flex;
 			flex: 1;
@@ -227,15 +299,23 @@
 			gap: var(--small-gap);
 		">
 		</div>
-		<hr style="border: none; border-top: 1px solid var(--medium); margin: 0px;">
-		<button onclick="showPoppup('add-server')"><mpqcht-add width="32" height="32"></mpqcht-add></button>
-		<button onclick="showPoppup('profile-settings')" style="padding: calc(var(--medium-gap) + 1px)">
-			<mpqcht-profile-settings width="30" height="30"></mpqcht-profile-settings>
+		<hr style="border: none; border-top: 1px solid var(--tertiary); margin: 0px;">
+		<button onmousedown="showPoppup('add-server')"><wbr comp="mpqcht-add" width="32" height="32"></button>
+		<button onmousedown="showPoppup('profile-settings')" style="padding: calc(var(--medium-gap) + 1px)">
+			<wbr comp="mpqcht-profile-settings" width="30" height="30">
 		</button>
 	</nav>
 </template>
 
-<template id="circle-add" alias="bit-mage" dim="7" bits="
+<template id="server-select" static>
+	<button><wbr comp="mpqcht-logo" width="32" height="32"></button>
+</template>
+
+<template id="bit-mage">
+	<svg fill="currentColor" style="display: flex"></svg>
+</template>
+
+<template id="circle-add" alias="bit-mage" bits="
 	  XXX
 	 XX XX
 	XXX XXX
@@ -245,12 +325,11 @@
 	  XXX
 "></template>
 
-<template id="arrow-down" alias="bit-mage" dim="5" bits="
+<template id="arrow-down" alias="bit-mage" bits="
 	X   X
 	 X X
 	  X
 "></template>
-
 
 <template id="mpqcht-logo" alias="bit-mage" bits="
 	  XXXX
@@ -273,7 +352,6 @@
 	   X
 	   XX
 "></template>
-
 
 <template id="mpqcht-profile-settings" alias="bit-mage" bits="
 	    XX
@@ -300,13 +378,85 @@
 	   XX
 "></template>
 
-<template id="server-select" static>
-	<link rel="stylesheet" href="index.css">
-	<style>
-	</style>
+<template id="mpqcht-camera" alias="bit-mage" bits="
+	  XXXXX
+	    XXXX
+	 XXXXXXXXX
+	XXXXXXXXXXX
+	XXXXXXXXXXX
+	XXXXXXXXXXX
+	 XXXXXXXXX
+	    XXXX
+	  XXXXX 
+"></template>
 
-	<button><mpqcht-logo width="32" height="32"></mpqcht-logo></button>
+<template id="mpqcht-camera-disabled" alias="bit-mage" bits="
+	 X XXXX
+	  X XXXX
+	 X X XXXXX
+	XXX X XXXXX
+	XXXX X XXXX
+	XXXXX X XXX
+	 XXXXX X X
+	    XXX X
+	  XXXXX  X
+"></template>
+
+<template id="mpqcht-microphone" alias="bit-mage" bits="
+	   XX
+	  XXXX
+	  XXXX
+	X XXXX X
+	X XXXX X
+	 X XX X
+	  XXXX
+	   XX
+	  XXXX
+"></template>
+
+<template id="mpqcht-microphone-disabled" alias="bit-mage" bits="
+	X  XX
+	 X XXX
+	  X XX
+	X  X X X
+	X X X  X
+	 X X X
+	  XXX X
+	   XX  X
+	  XXXX  
+"></template>
+
+<template id="mpqcht-sound" alias="bit-mage" bits="
+	   XX XXX
+	  XXX   XX
+	XXXXX X  X
+	XXXXX XX X
+	XXXXX X  X
+	  XXX   XX
+	   XX XXX
+"></template>
+
+<template id="mpqcht-chat-bubble" alias="bit-mage" bits="
+	 XXXXX
+	XXXXXXX
+	XXXXXXX
+	XXXXXXX
+	 XXXXX
+	     XX
+">
 </template>
+
+<template id="mpqcht-hang-up" alias="bit-mage" bits="
+	      XXX
+	 X           X
+	X   XXXXXXX   X
+	  XXXXXXXXXXX
+	 XXXXXXXXXXXXX
+	XXXXXXXXXXXXXXX
+	XXXX       XXXX
+	XXXX       XXXX
+	 XX         XX
+"></template>
 
 <script type="module" src="index.js"></script>
 

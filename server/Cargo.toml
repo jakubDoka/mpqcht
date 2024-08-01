@@ -17,10 +17,21 @@ toml = { version = "0.8.14" }
 tower-service = "0.3.2"
 trained-compression = { version = "0.1.0", path = "../trained-compression" }
 notify = { version = "6.1.1", optional = true }
+serde_json = "1.0.120"
+
+hmac = { version = "0.12.1", optional = true }
+sha1 = { version = "0.10.6", optional = true }
+pbkdf2 = { version = "0.12.2", optional = true }
+base64 = { version = "0.22.1", optional = true }
 
 [features]
-default = ["hot-reload"]
+default = ["hot-reload", "voice"]
+voice = ["axum/ws", "hmac", "sha1", "pbkdf2", "base64"]
 tls = ["axum-server"]
 gzip = []
 hot-reload = ["notify"]
+hmac = ["dep:hmac"]
+sha1 = ["dep:sha1"]
+pbkdf2 = ["dep:pbkdf2"]
+base64 = ["dep:base64"]
 

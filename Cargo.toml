@@ -1,5 +1,18 @@
 [workspace]
 resolver = "2"
-members = [ "client","server", "trained-compression"]
+members = [
+	"client",
+	"server",
+	"trained-compression",
+]
 
+[profile.release]
+opt-level = "z"
+panic = "abort"
+lto = true
+strip = true
+codegen-units = 1
 
+[profile.minimal-size]
+inherits = "release"
+opt-level = "z"

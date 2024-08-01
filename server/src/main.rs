@@ -130,6 +130,12 @@ impl Color {
     const WHITE: Self = Self(0xffffffffu32.to_le_bytes());
 }
 
+impl From<u32> for Color {
+    fn from(i: u32) -> Self {
+        Color(i.to_be_bytes())
+    }
+}
+
 impl std::str::FromStr for Color {
     type Err = FromHexError;
 
@@ -187,6 +193,7 @@ struct Role {
     name: String,
     #[serde(default = "default_color")]
     color: Color,
+    voice_tier: Option<voice::Tier>,
 }
 
 type ChannelId = u16;
@@ -197,7 +204,11 @@ struct Channel {
     group: String,
     name: String,
     roles: Vec<RolePermissions>,
+    #[serde(default)]
     default_permissions: RolePermissions,
+    #[cfg(feature = "voice")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    voice: Option<voice::Channel>,
 }
 
 fn default_true() -> bool {
@@ -208,14 +219,14 @@ fn default_message_length() -> usize {
     1024 * 4
 }
 
-#[derive(serde::Deserialize, serde::Serialize, Clone, Copy)]
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, Default)]
 struct RolePermissions {
     id: RoleId,
     #[serde(default = "default_true")]
     view: bool,
     #[serde(default = "default_true")]
     write: bool,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     action_rate_limit: Option<u64>,
     #[serde(default)]
     moderate: bool,
@@ -240,9 +251,49 @@ impl RolePermissions {
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
+struct Theme {
+    primary: Color,
+    secondary: Color,
+    tertiary: Color,
+    font: Color,
+    neutral: Color,
+    success: Color,
+    warning: Color,
+    error: Color,
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Self {
+            primary: Color::from(0x2C254FFF),
+            secondary: Color::from(0x594B9EFF),
+            tertiary: Color::from(0x8874EEFF),
+            font: Color::from(0xEDEDEDFF),
+            neutral: Color::from(0xF6B248FF),
+            success: Color::from(0xC2F353FF),
+            warning: Color::from(0xCC931EFF),
+            error: Color::from(0xD64E3CFF),
+        }
+    }
+}
+
+fn default_light_theme() -> Theme {
+    Theme::default()
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 struct Config {
     hostname: user::Name,
+    #[cfg(feature = "voice")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    turn: Option<user::Name>,
     roots: Vec<Hex<33>>,
+
+    #[serde(default)]
+    dark_theme: Theme,
+    #[serde(default = "default_light_theme")]
+    light_theme: Theme,
 
     #[serde(default = "default_port")]
     port: u16,
@@ -253,7 +304,9 @@ struct Config {
     #[serde(default = "default_key_path")]
     key: String,
 
+    #[serde(default)]
     channels: Vec<Channel>,
+    #[serde(default)]
     roles: Vec<Role>,
 }
 
@@ -264,8 +317,12 @@ impl Config {
         self.channels.iter_mut().for_each(|c| c.roles.sort_unstable_by_key(|r| r.id));
     }
 
+    fn channel(&self, id: ChannelId) -> Option<&Channel> {
+        bin_find(&self.channels, id, |c| c.id)
+    }
+
     fn channel_perms(&self, channel: ChannelId, roles: user::Roles) -> Option<RolePermissions> {
-        let channel = bin_find(&self.channels, channel, |c| c.id)?;
+        let channel = self.channel(channel)?;
         let role = channel
             .roles
             .iter()
@@ -273,9 +330,16 @@ impl Config {
             .fold(channel.default_permissions, RolePermissions::max);
         Some(role)
     }
+
+    fn best_tier(&self, roles: user::Roles) -> Option<voice::Tier> {
+        roles
+            .filter_map(|r| bin_find(self.roles.as_slice(), r, |r| r.id))
+            .filter_map(|r| r.voice_tier)
+            .min()
+    }
 }
 
-fn bin_find<T, F: FnMut(&T) -> ChannelId>(space: &[T], needle: ChannelId, key: F) -> Option<&T> {
+fn bin_find<T, K: Ord, F: FnMut(&T) -> K>(space: &[T], needle: K, key: F) -> Option<&T> {
     space.binary_search_by_key(&needle, key).ok().map(|i| &space[i])
 }
 
@@ -293,7 +357,7 @@ mod config {
         crate::StPat(state): crate::St,
         crate::Json(mut body): crate::Json<crate::Config>,
     ) -> Result<(), crate::Error> {
-        crate::ensure!(state.config.load().roots.contains(&crate::Hex(id)), UNAUTHORIZED);
+        crate::ensure!(state.config.load().roots.contains(&id), UNAUTHORIZED);
         body.sort();
         std::fs::write("config.toml", toml::to_string_pretty(&body).unwrap()).unwrap();
         state.config.store(body.into());
@@ -328,7 +392,7 @@ fn char_to_hex((i, c): (usize, char)) -> Result<u8, FromHexError> {
     })
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 struct Hex<const N: usize>([u8; N]);
 
 impl<const N: usize> std::str::FromStr for Hex<N> {
@@ -409,6 +473,12 @@ impl From<sqlt::Error> for Error {
 
         eprintln!("uncategorized error: {e:#}");
         Error(crate::SC::INTERNAL_SERVER_ERROR)
+    }
+}
+
+impl From<crate::SC> for crate::Error {
+    fn from(e: crate::SC) -> Self {
+        Self(e)
     }
 }
 
@@ -611,7 +681,7 @@ mod messages {
                 id: rowid as _,
                 channel: q.channel,
                 timestamp: crate::now(),
-                author_pk: crate::Hex(id),
+                author_pk: id,
                 author: user.name,
                 content: Compressed(content),
             })));
@@ -660,7 +730,7 @@ mod user {
             WHERE pk = ?2 AND nonce < ?1 + 600 RETURNING name, roles",
     }
 
-    #[derive(Clone, Copy, serde::Serialize)]
+    #[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
     pub struct User {
         pub name: Name,
         pub roles: Roles,
@@ -672,7 +742,7 @@ mod user {
         }
     }
 
-    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, Default)]
     #[repr(transparent)]
     pub struct RoleId(u8);
 
@@ -694,18 +764,27 @@ mod user {
     #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
     pub struct Roles(i64);
 
+    impl Iterator for Roles {
+        type Item = RoleId;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            if self.0 == 0 {
+                return None;
+            }
+            let role = RoleId(self.0.trailing_zeros() as u8);
+            self.0 &= self.0 - 1;
+            Some(role)
+        }
+    }
+
     impl serde::Serialize for Roles {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: serde::Serializer,
         {
             let mut seq = serializer.serialize_seq(Some(self.0.count_ones() as _))?;
-            let mut cur = self.0 as u64;
-            for i in cur.trailing_zeros()..64 - cur.leading_zeros() {
-                if cur & 1 != 0 {
-                    seq.serialize_element(&i)?;
-                }
-                cur >>= 1;
+            for role in *self {
+                seq.serialize_element(&role)?;
             }
             seq.end()
         }
@@ -847,9 +926,9 @@ mod user {
         }
     }
 
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
     pub struct Auth {
-        pub id: [u8; 33],
+        pub id: crate::Hex<33>,
         pub user: User,
     }
 
@@ -866,7 +945,7 @@ mod user {
                     .ok_or(status_err(crate::SC::FORBIDDEN))?
             })?;
 
-            Ok(Self { id: params.pk, user })
+            Ok(Self { id: crate::Hex(params.pk), user })
         }
     }
 
@@ -990,6 +1069,248 @@ mod other_user {
     }
 }
 
+#[cfg(feature = "voice")]
+mod voice {
+    use {
+        crate::{
+            user::{self, Auth, User},
+            ChannelId, Config,
+        },
+        axum::{extract::ws::Message, Json},
+        futures::{FutureExt, StreamExt},
+        std::{collections::HashMap, sync::RwLock},
+        tokio::sync::mpsc,
+    };
+
+    pub type Tier = u8;
+
+    #[derive(serde::Deserialize, serde::Serialize, Clone, Copy)]
+    pub struct TierSpec {
+        pub id: Tier,
+        pub bandwidth: usize,
+        pub session_duration_secs: usize,
+    }
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    pub struct TurnCreds {
+        expiry: u64,
+        username: String,
+        password: String,
+    }
+
+    pub mod coturn {
+        use hmac::{digest::KeyInit, Mac};
+
+        pub struct TurnServer {
+            secret: hmac::Hmac<sha1::Sha1>,
+        }
+
+        impl TurnServer {
+            pub fn from_env() -> Self {
+                let secret = std::env::var("TURN_SECRET").expect("TURN_SECRET env var is not set");
+                Self::new(&secret)
+            }
+
+            pub fn new(secret: &str) -> Self {
+                Self {
+                    secret: <hmac::Hmac<sha1::Sha1> as KeyInit>::new_from_slice(secret.as_bytes())
+                        .unwrap(),
+                }
+            }
+
+            pub async fn generate_credentials(
+                &self,
+                tier: super::Tier,
+                duration: std::time::Duration,
+            ) -> Result<super::TurnCreds, crate::Error> {
+                let expiry = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .saturating_add(duration)
+                    .as_secs();
+                let username = format!("{expiry}:{tier}");
+                let mut sha = self.secret.clone();
+                sha.update(username.as_bytes());
+                use base64::Engine;
+                let password =
+                    base64::engine::general_purpose::STANDARD.encode(sha.finalize().into_bytes());
+                Ok(super::TurnCreds { username, password, expiry })
+            }
+        }
+    }
+
+    #[derive(serde::Deserialize, serde::Serialize, Clone, Copy)]
+    pub struct Channel {
+        max_participants: usize,
+    }
+
+    struct Peer {
+        auth: user::Auth,
+        sender: mpsc::Sender<String>,
+    }
+
+    pub struct Session {
+        id: ChannelId,
+        peers: RwLock<HashMap<[u8; 33], Peer>>,
+        channel: Channel,
+    }
+
+    impl Session {
+        pub fn init(config: &Config) -> Vec<Self> {
+            config
+                .channels
+                .iter()
+                .filter_map(|ch| {
+                    ch.voice.map(|channel| Session {
+                        id: ch.id,
+                        peers: Default::default(),
+                        channel,
+                    })
+                })
+                .collect()
+        }
+    }
+
+    #[derive(serde::Serialize, serde::Deserialize, Debug)]
+    struct PeekTo {
+        to: crate::Hex<33>,
+    }
+
+    #[allow(non_camel_case_types)]
+    #[derive(serde::Serialize, serde::Deserialize)]
+    #[serde(tag = "type")]
+    enum SystemEvent {
+        left { to: crate::Hex<33>, from: crate::Hex<33>, body: User },
+        joined { to: crate::Hex<33>, from: crate::Hex<33>, body: User },
+    }
+
+    pub async fn ws(
+        axum::extract::Path((channel, params)): axum::extract::Path<(ChannelId, user::AuthParams)>,
+        ws: axum::extract::WebSocketUpgrade,
+        crate::StPat(state): crate::St,
+    ) -> Result<axum::response::Response, crate::Error> {
+        #[derive(Debug)]
+        enum Event {
+            Recv(String),
+            Send(String),
+        }
+
+        let auth = user::Auth::from_params(params, &state)?;
+
+        if state.config.load().channel_perms(channel, auth.user.roles).map_or(true, |p| !p.view) {
+            return Err(crate::SC::FORBIDDEN.into());
+        }
+
+        let sessions = state.voice_sessions.load_full();
+        let session_index =
+            sessions.binary_search_by_key(&channel, |s| s.id).ok().ok_or(crate::SC::NOT_FOUND)?;
+
+        {
+            let session = &sessions[session_index];
+            if session.peers.read().unwrap().len() == session.channel.max_participants {
+                return Err(crate::SC::TOO_MANY_REQUESTS.into());
+            }
+        }
+
+        fn to_message<T: serde::Serialize>(e: T) -> String {
+            serde_json::to_string(&e).unwrap_or_else(|e| {
+                eprintln!("error serializing event: {e:#}");
+                String::new()
+            })
+        }
+
+        Ok(ws.on_upgrade(move |mut socket| async move {
+            let session = &sessions[session_index];
+            let mut recv = {
+                let mut peers = session.peers.write().unwrap();
+                for (&id, peer) in peers.iter() {
+                    _ = peer.sender.try_send(to_message(SystemEvent::joined {
+                        to: crate::Hex(id),
+                        from: auth.id,
+                        body: auth.user,
+                    }));
+                }
+                let (sender, receiver) = mpsc::channel(10);
+                peers.insert(auth.id.0, Peer { auth, sender });
+                receiver
+            };
+
+            loop {
+                let event = futures::select! {
+                    msg = socket.next().fuse() => {
+                        let Some(Ok(Message::Text(msg))) = msg else { break };
+                        Event::Send(msg)
+                    },
+                    msg = recv.recv().fuse() => {
+                        let Some(msg) = msg else { break };
+                        Event::Recv(msg)
+                    },
+                };
+
+                if match event {
+                    Event::Recv(msg) => socket.send(Message::Text(msg)).await.is_err(),
+                    Event::Send(msg) => {
+                        let Ok(PeekTo { to }) = serde_json::from_str(&msg) else { break };
+                        let peer =
+                            session.peers.read().unwrap().get(&to.0).map(|s| s.sender.clone());
+                        if let Some(peer) = peer {
+                            _ = peer.try_send(msg);
+                        }
+                        false
+                    }
+                } {
+                    break;
+                }
+            }
+
+            let mut peers = session.peers.write().unwrap();
+            peers.remove(&auth.id.0);
+            for (&id, peer) in peers.iter() {
+                _ = peer.sender.try_send(to_message(SystemEvent::left {
+                    from: auth.id,
+                    to: crate::Hex(id),
+                    body: auth.user,
+                }));
+            }
+        }))
+    }
+
+    pub async fn peers(
+        axum::extract::Path((channel,)): axum::extract::Path<(ChannelId,)>,
+        Auth { id, .. }: Auth,
+        crate::StPat(state): crate::St,
+    ) -> Result<Json<Vec<Auth>>, crate::Error> {
+        let sessions = state.voice_sessions.load();
+        let index =
+            sessions.binary_search_by_key(&channel, |s| s.id).ok().ok_or(crate::SC::NOT_FOUND)?;
+        let vec = sessions[index]
+            .peers
+            .read()
+            .unwrap()
+            .values()
+            .map(|p| p.auth)
+            .filter(|a| a.id != id)
+            .collect();
+        Ok(Json(vec))
+    }
+
+    pub async fn turn_auth(
+        Auth { user, id }: Auth,
+        crate::StPat(state): crate::St,
+    ) -> Result<Json<TurnCreds>, crate::Error> {
+        let is_root = state.config.load().roots.contains(&id);
+
+        let realm = if is_root {
+            0
+        } else {
+            state.config.load().best_tier(user.roles).ok_or(crate::SC::FORBIDDEN)?
+        };
+
+        let timeout = std::time::Duration::from_secs(3600);
+        state.turn.generate_credentials(realm, timeout).await.map(Json)
+    }
+}
+
 mod sse {
     use {
         crate::{messages, user},
@@ -1006,7 +1327,7 @@ mod sse {
     }
 
     mod stream {
-        use {super::*, std::future::Future};
+        use {super::*, n::*, std::future::Future};
 
         struct State {
             auth: user::Auth,
@@ -1014,28 +1335,31 @@ mod sse {
             events: broadcast::Receiver<Event>,
         }
 
-        type Nexter = impl Future<Output = Option<(State, Event)>>;
+        mod n {
+            use super::*;
+            pub type Nexter = impl Future<Output = Option<(State, Event)>>;
 
-        impl State {
-            fn next(mut self) -> Nexter {
-                async move {
-                    loop {
-                        let ev = self.events.recv().await.ok()?;
-                        if self.should_send(&ev) {
-                            break Some((self, ev));
+            impl State {
+                pub fn next(mut self) -> Nexter {
+                    async move {
+                        loop {
+                            let ev = self.events.recv().await.ok()?;
+                            if self.should_send(&ev) {
+                                break Some((self, ev));
+                            }
                         }
                     }
                 }
-            }
 
-            fn should_send(&self, ev: &Event) -> bool {
-                match ev {
-                    Event::Message(msg) => self
-                        .state
-                        .config
-                        .load()
-                        .channel_perms(msg.channel, self.auth.user.roles)
-                        .map_or(false, |p| p.view),
+                pub fn should_send(&self, ev: &Event) -> bool {
+                    match ev {
+                        Event::Message(msg) => self
+                            .state
+                            .config
+                            .load()
+                            .channel_perms(msg.channel, self.auth.user.roles)
+                            .map_or(false, |p| p.view),
+                    }
                 }
             }
         }
@@ -1082,16 +1406,16 @@ mod sse {
 }
 
 #[cfg(not(feature = "tls"))]
-async fn serve(addr: std::net::SocketAddr, app: axum::Router) {
+async fn serve(addr: std::net::SocketAddr, app: axum::Router, _: State) {
     let socket = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(socket, app).await.unwrap();
 }
 
 #[cfg(feature = "tls")]
-async fn serve(addr: std::net::SocketAddr, app: axum::Router) {
+async fn serve(addr: std::net::SocketAddr, app: axum::Router, state: State) {
     use axum_server::tls_rustls::RustlsConfig;
 
-    let config = Config::get();
+    let config = state.config.load();
     let config = RustlsConfig::from_pem_file(&config.cert, &config.key).await.unwrap();
 
     axum_server::bind_rustls(addr, config).serve(app.into_make_service()).await.unwrap();
@@ -1159,6 +1483,10 @@ type State = &'static OwnedState;
 struct OwnedState {
     config: arc_swap::ArcSwap<Config>,
     pubsub: broadcast::Sender<Event>,
+    #[cfg(feature = "voice")]
+    voice_sessions: arc_swap::ArcSwap<Vec<voice::Session>>,
+    #[cfg(feature = "voice")]
+    turn: voice::coturn::TurnServer,
 }
 
 impl OwnedState {
@@ -1170,6 +1498,10 @@ impl OwnedState {
         config.sort();
 
         Ok(OwnedState {
+            #[cfg(feature = "voice")]
+            voice_sessions: arc_swap::ArcSwap::from_pointee(voice::Session::init(&config)),
+            #[cfg(feature = "voice")]
+            turn: voice::coturn::TurnServer::from_env(),
             config: arc_swap::ArcSwap::from_pointee(config),
             pubsub: broadcast::channel(100).0,
         })
@@ -1244,7 +1576,7 @@ async fn main() {
         Ok(s) => s,
         Err(e) => panic!("{e}"),
     };
-    let state = unsafe { &*(&state as *const _) };
+    let state: &'static OwnedState = unsafe { &*(&state as *const _) };
 
     {
         let db = db::connect();
@@ -1272,14 +1604,17 @@ async fn main() {
         .route("/config", get(config::get))
         .route("/config", patch(config::update))
         .route("/sse/:auth", get(sse::get))
-        .nest_service("/", StaticFiles)
-        .with_state(state);
+        .nest_service("/", StaticFiles);
+
+    #[cfg(feature = "voice")]
+    let app = app
+        .route("/voice/:channel/ws/:auth", get(voice::ws))
+        .route("/voice/:channel/peers", get(voice::peers))
+        .route("/voice/turn-auth", get(voice::turn_auth));
 
     #[cfg(feature = "hot-reload")]
     let app = app.route("/hot-reload", get(hot_reload::get));
 
-    let port =
-        std::env::var("PORT").ok().and_then(|s| s.parse().ok()).unwrap_or(state.config.load().port);
-
-    serve((Ipv4Addr::UNSPECIFIED, port).into(), app).await;
+    serve((Ipv4Addr::LOCALHOST, state.config.load().port).into(), app.with_state(state), state)
+        .await;
 }
