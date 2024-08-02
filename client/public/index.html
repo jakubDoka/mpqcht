@@ -10,8 +10,10 @@
 <body data-env="debug" style="margin: 0; background-color: var(--primary); overflow: hidden">
 	<div id="login" hidden>
 		<form onsubmit="loginHandler(this); return false;">
-			<input type="password" autocomplete="current-password" name="mnemonic" placeholder="mnemonic..." required
-				oninput="validateMnemonic(this)">
+			<input type="text" autocomplete="username" name="username" placeholder="username..." required
+				maxlength="32">
+			<input type="password" autocomplete="current-password" name="password" placeholder="password..." required
+				maxlength="256">
 			<input type="submit" value="login">
 		</form>
 	</div>

@@ -1,7 +1,5 @@
 /// @ts-check
 
-import init_crypto, { derive_keys } from "./crypto/client.js"
-
 // ## DOM
 
 /** @template {HTMLElement} T @param {string} id @returns T */
@@ -34,16 +32,10 @@ async function toggleInput(kind, elem) {
 	elem.classList.toggle("disabled");
 }
 
-/** @param {HTMLInputElement} mnemonic */
-function validateMnemonic(mnemonic) {
-	try { derive_keys(mnemonic.value); }
-	catch (e) { return mnemonic.setCustomValidity(e); }
-	mnemonic.setCustomValidity('');
-}
-
 /** @param {HTMLFormElement} elem */
 async function loginHandler(elem) {
-	mnemonic(elem.elements['mnemonic'].value);
+	username(elem.elements['username'].value);
+	password(elem.elements['password'].value);
 	selectPage("servers");
 }
 
@@ -129,11 +121,10 @@ function togglePoppup(id, hide) {
 // ## RENDERING
 
 async function render() {
+	getCrypto();
 	renderComponents(document.body);
 
-	await init_crypto();
-
-	if (!mnemonic()) {
+	if (!username() || !password()) {
 		selectPage("login");
 		return;
 	}
@@ -286,8 +277,8 @@ class VoiceChat {
 			pc: new RTCPeerConnection({
 				iceTransportPolicy: "relay",
 				iceServers: [{
-					username: "smh",
-					credential: "fmh",
+					username,
+					credential: password,
 					urls: this.#server.turnHost,
 				}],
 			}),
@@ -697,7 +688,10 @@ async function getProfile(server) {
 // ## STORAGE
 
 /** @type {Keys | undefined} */ let _keys; async function keys() {
-	return _keys ||= await deriveKeys(mnemonic() ?? logout("missing mnemonic"));
+	return _keys ||= await deriveKeys(
+		username() ?? logout("missing username"),
+		password() ?? logout("missing password")
+	);
 }
 
 /** @template {any} T @param {(chats: Set<string>) => T} cb @returns T */
@@ -743,7 +737,7 @@ function declStorage(keys, store) {
 		(value = undefined) => value !== undefined ? store[key] = value : store[key]);
 }
 
-const [mnemonic] = declStorage("mnemonic", sessionStorage);
+const [username, password] = declStorage("username;password", sessionStorage);
 const [backups] = declStorage("backups", localStorage);
 const [page, server, channel, poppup, invoice] =
 	declStorage("page;server;channel;poppup;invoice", queryParams);
@@ -754,11 +748,39 @@ const [page, server, channel, poppup, invoice] =
  * @property {CryptoKeyPair} signing 
  * @property {CryptoKey} vault */
 
+
+/** @type {WebAssembly.Instance} */
+let wasmInstance;
+/** @returns {Promise<WebAssembly.Instance>} */
+async function getCrypto() {
+	return wasmInstance ||= await fetch("libcrypto.a.o")
+		.then(r => r.arrayBuffer())
+		.then(b => WebAssembly.instantiate(b, {
+			env: {
+				"__linear_memory": new WebAssembly.Memory({ initial: 1 }),
+				"__stack_pointer": new WebAssembly.Global({ value: "i32", mutable: true }, 0),
+			}
+		})).then(i => i.instance);
+}
+
 const ecdsaAlg = { name: "ECDSA", namedCurve: "P-256" };
 const aesAlg = { name: "AES-GCM", length: 256 };
-/** @param {string} mnemonic  @return {Promise<Keys>} */
-async function deriveKeys(mnemonic) {
-	const keys = derive_keys(mnemonic);
+/** @param {string} username @param {string} password @return {Promise<Keys>} */
+async function deriveKeys(username, password) {
+	const cryptoLib = await getCrypto();
+
+	console.log(cryptoLib);
+
+	const {
+		username: username_loc, username_len,
+		password: passsword_loc, password_len,
+		derive_keys, clear_secrets,
+	} = cryptoLib.exports;
+
+	if (typeof derive_keys !== "function") never();
+	if (derive_keys() !== 0) never();
+
+	const keys = derive_keys();
 	// I honestly hate you so much W3C
 	const jwk = {
 		crv: "P-256",
@@ -1465,7 +1487,7 @@ render();
 
 Object.assign(window, {
 	hidePoppup, showPoppup,
-	loginHandler, validateMnemonic,
+	loginHandler,
 	addServerHandler, Server,
 	selectChannelHandler,
 	messageInputHandler, messageKeyDownHandler,

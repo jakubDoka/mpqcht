@@ -44,6 +44,7 @@ extern crate rusqlite as sqlt;
 
 use {
     self::{sse::Event, user::RoleId},
+    arc_swap::access::Access,
     axum::{
         extract::{Json, Query, State as StPat},
         http::StatusCode as SC,
@@ -281,6 +282,10 @@ fn default_light_theme() -> Theme {
     Theme::default()
 }
 
+fn default_public_path() -> String {
+    "public".to_string()
+}
+
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
@@ -289,6 +294,8 @@ struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     turn: Option<user::Name>,
     roots: Vec<Hex<33>>,
+    #[serde(default = "default_public_path")]
+    public: String,
 
     #[serde(default)]
     dark_theme: Theme,
@@ -1422,7 +1429,7 @@ async fn serve(addr: std::net::SocketAddr, app: axum::Router, state: State) {
 }
 
 #[derive(Clone)]
-struct StaticFiles;
+struct StaticFiles(State);
 
 impl tower_service::Service<axum::http::Request<axum::body::Body>> for StaticFiles {
     type Error = std::convert::Infallible;
@@ -1438,6 +1445,7 @@ impl tower_service::Service<axum::http::Request<axum::body::Body>> for StaticFil
     }
 
     fn call(&mut self, req: axum::http::Request<axum::body::Body>) -> Self::Future {
+        let state = self.0;
         async move {
             if req.uri().path().contains("..") {
                 return Ok(status(crate::SC::NOT_ACCEPTABLE));
@@ -1454,6 +1462,12 @@ impl tower_service::Service<axum::http::Request<axum::body::Body>> for StaticFil
                 Some(ext @ "wasm") => format!("application/{}", ext),
                 _ => "application/octet-stream".to_string(),
             };
+
+            if cfg!(feature = "gzip") {
+                path.push_str(".gz");
+            }
+
+            path.insert_str(0, state.config.load().public.as_str());
 
             // we only load small files
             Ok(match std::fs::read(path) {
@@ -1604,7 +1618,7 @@ async fn main() {
         .route("/config", get(config::get))
         .route("/config", patch(config::update))
         .route("/sse/:auth", get(sse::get))
-        .nest_service("/", StaticFiles);
+        .nest_service("/", StaticFiles(state));
 
     #[cfg(feature = "voice")]
     let app = app

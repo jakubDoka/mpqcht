@@ -1,2 +1,5 @@
 /target
 **/*.db3
+/client/public-gz/*
+/client/public/*.wasm
+/client/zig-crypto/*.o

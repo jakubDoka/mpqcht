@@ -1,4 +1,4 @@
-hostname = "mpqcht.mlokis.tech"
+hostname = "localhost"
 roots = [
 	"02e9e11f4e58697c85737129c7badba89de7da00716a16caf9044002a6b5222966",
 	"0345ae1fa1e046e264d8ac3d849df16ea6d9a8fd505cf320202c664f6dffce364e",
