@@ -14,42 +14,32 @@ pub fn build(b: *std.Build) void {
     const no_wasm_opt = b.option(bool, "no-wasm-opt", "disable wasm-opt") orelse false;
     const target = b.option([]const u8, "server-target", "target triple of the server");
 
-    // const crypto_wasm = b.addExecutable(.{
-    //     .name = "crypto",
-    //     .root_source_file = b.path("client/crypto.zig"),
-    //     .target = b.resolveTargetQuery(.{
-    //         .cpu_arch = .wasm32,
-    //         .os_tag = .freestanding,
-    //     }),
-    //     .optimize = .ReleaseSmall,
-    // });
-
     buf.items.len = 0;
     buf.fixedWriter().print("{}", .{b.cache_root}) catch unreachable;
 
-    const crypto_wasm = b.addSystemCommand(&.{
-        "zig",
-        "build-exe",
-        "--cache-dir",
-        buf.items,
-        "-target",
-        "wasm32-freestanding",
-        "-fno-entry",
-        "-OReleaseSmall",
-        "--export=derive_keys",
-        "--export=clear_secrets",
-        "--export=username",
-        "--export=username_len",
-        "--export=password",
-        "--export=password_len",
-        "--export=vault",
-        "--export=ecdsa_vkey",
-        "--export=ecdsa_skey",
+    const crypto_wasm = b.addExecutable(.{
+        .name = "lib",
+        .root_source_file = b.path("client/crypto.zig"),
+        .target = b.resolveTargetQuery(.{
+            .cpu_arch = .wasm32,
+            .os_tag = .freestanding,
+        }),
+        .optimize = .ReleaseSmall,
     });
+    crypto_wasm.entry = .disabled;
+    crypto_wasm.root_module.export_symbol_names = &.{
+        "derive_keys",
+        "password",
+        "password_len",
+        "username",
+        "username_len",
+        "vault",
+        "ecdsa_vkey",
+        "ecdsa_skey",
+        "clear_secrets",
+    };
 
-    crypto_wasm.addFileArg(b.path("client/crypto.zig"));
-    var wasm_path = crypto_wasm.addPrefixedOutputFileArg("-femit-bin=", "crypto.wasm");
-
+    var wasm_path = crypto_wasm.getEmittedBin();
     if (!no_wasm_opt) {
         const wasm_opt = b.addSystemCommand(&.{ "wasm-opt", "-Oz" });
         wasm_opt.addFileArg(wasm_path);
@@ -101,7 +91,7 @@ pub fn build(b: *std.Build) void {
     if (buf.items.len > 0) cargo.addArgs(&.{ "--features", buf.items });
 
     const profile = if (debug) "debug" else "release";
-    const target_seg = if (target) |t| t else "";
+    const target_seg = target orelse "";
     const install_server = b.addInstallFile(
         b.path(b.pathJoin(&.{ "target", target_seg, profile, "server" })),
         "server",

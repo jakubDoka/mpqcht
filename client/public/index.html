@@ -36,7 +36,7 @@
 				align-items: center;
 				gap: var(--small-gap);
 			">
-				<wbr comp="mpqcht-bulb" width="24" height="27">
+				<wbr comp="mpqcht-bulb" width="16" style="flex-shrink: 0">
 				<div>
 					Your public key is
 					<span id="add-server-pubkey" style="
@@ -45,6 +45,26 @@
 					. If you can edit the server config, add it to the list
 					of roots. Oterwise, a member with invite
 					permission has to allow the key.
+				</div>
+			</div>
+		</form>
+	</div>
+	<div id="invite-user" hidden class="poppup">
+		<form onsubmit="inviteUserHandler(this); event.preventDefault(); return false;"
+			style="width: min(400px, calc(100% - 40px))">
+			<input type="text" name="pubkey" pattern="[0-9a-fA-F]{66}" placeholder="pubkey..." required>
+			<input type="submit" value="add">
+			<input type="button" value="cancel" onmousedown="hidePoppup('invite-user')">
+
+			<div style="
+				display: flex;
+				align-items: center;
+				gap: var(--small-gap);
+			">
+				<wbr comp="mpqcht-bulb" width="16" style="flex-shrink: 0">
+				<div>
+					Every user has a public key computed from their username and
+					password. And can be obtaind from the settings.
 				</div>
 			</div>
 		</form>
@@ -223,6 +243,7 @@
 				background-color: var(--secondary);
 				font-family: inherit;
 				font-size: 16px;
+				color: var(--font);
 			"></textarea>
 		</div>
 	</div>
@@ -263,10 +284,20 @@
 		border-top-right-radius: var(--medium-gap);
 		border-bottom-right-radius: var(--medium-gap);
 	">
-		<div id="name" style="
+		<div style="
 			font-size: 20px;
 			padding: var(--medium-gap);
-		">foo</div>
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+		">
+			<div id="name"></div>
+			<div>
+				<button onmousedown="showPoppup('invite-user')" style="padding: 0; border-radius: 0;">
+					<wbr comp="mpqcht-add-user" height="24">
+				</button>
+			</div>
+		</div>
 		<hr style="border: none; border-top: 1px solid var(--tertiary); margin: 0px var(--small-gap);">
 		<div id="groups" style="
 			display: flex;
@@ -460,6 +491,21 @@
 	 XX         XX
 "></template>
 
-<script type="module" src="index.js"></script>
+<template id="mpqcht-add-user" alias="bit-mage" bits="
+	    XXX
+	  XXXXXXX
+	  XXXXXXX
+	 XXXX    X
+	 XXXX XX X
+	 XXXX  X X
+	 X    XX 
+	   X XXXXXX
+	   XXXXXX X
+	      XX
+	 XXXX X  X
+	XXXXX XX XX
+"></template>
+
+<script src="index.js"></script>
 
 </html>

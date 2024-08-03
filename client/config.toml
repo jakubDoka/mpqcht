@@ -1,30 +1,48 @@
+# config.toml
+
+# Warning: all members of the community will read JSON form data in this file to render the frontend.
+
+# most of the objects declarable here have both `name` and `id`, `id` is for code and `name` if for humans. For example, changing the name a channel will not change the related messages, changing `id` will.
+
 hostname = "localhost"
+# public keys of highest privileged users that can edit this config remotely and in general don't need role permissions
 roots = [
-	"02e9e11f4e58697c85737129c7badba89de7da00716a16caf9044002a6b5222966",
+	"03c73b28ecc16df23eca8a66f4178a2ecfd6850f4e6dc135ce4e27791d4058301a",
 	"0345ae1fa1e046e264d8ac3d849df16ea6d9a8fd505cf320202c664f6dffce364e",
 	"03811f8505552278403036066b1ec110752ac80109a6caab5d050134fa01591ae7",
 ]
 	
-roles = []
+[[roles]]
+id = 0
+name = "admin"
 
-[[channels]] 
+[[roles]]
+id = 1
+name = "other role"
+
+# simplest channel configuration, the channel is just a historical sequence
+# of messages
+[[channels]]
 id = 0
 name = "channello"
 group = "grouplo"
-roles = []
-default_permissions = { id = 0 }
 
-[[channels]] 
+[[channels]]
 id = 2
 name = "channello3"
 group = "grouplo"
-roles = []
-default_permissions = { id = 0 }
+# if user does not have a role in the list, he will fall back to this
+default_permissions = { write = false }
+roles = [
+	# allow only admins to read and send huge messages
+	{ id = 0, max_message_length = 10000 },
+	# disallow `other role`s from reading
+	{ id = 1, read = false },
+]
 
 [[channels]]
 id = 3
 name = "voicechat"
 group = "voices"
-roles = []
-default_permissions = { id = 0 }
+# assuming voice chat is enabled, presence of this filed will attach voice chat to the channel
 voice = { max_participants = 10 }

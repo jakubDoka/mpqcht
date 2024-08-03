@@ -48,6 +48,11 @@ async function loginHandler(elem) {
 	selectPage("servers");
 }
 
+/** @param {HTMLFormElement} elem */
+async function inviteUserHandler(elem) {
+
+}
+
 const addServerHint = getStaticElemById("add-server-hint"),
 	addServerPubkey = getStaticElemById("add-server-pubkey");
 /** @param {HTMLFormElement} elem */
@@ -118,8 +123,15 @@ async function messageKeyDownHandler(elem, event) {
 }
 
 /** @param {string | undefined} id @param {boolean} hide */
-function togglePoppup(id, hide) {
+async function togglePoppup(id, hide) {
 	if (!id) return;
+
+	if (!hide) switch (id) {
+		case "profile-settings": {
+			getStaticElemById(id + "-pubkey").textContent = toHex(await pubkey());
+		} break;
+	}
+
 	getStaticElemById(id).hidden = hide;
 	poppup(hide ? "" : id);
 }
@@ -1534,12 +1546,3 @@ function catchUnhandledKeys(e) {
 document.onkeydown = catchUnhandledKeys;
 
 render();
-
-Object.assign(window, {
-	hidePoppup, showPoppup,
-	loginHandler,
-	addServerHandler, Server,
-	selectChannelHandler,
-	messageInputHandler, messageKeyDownHandler,
-	toggleCam, toggleMic, hangUp,
-});

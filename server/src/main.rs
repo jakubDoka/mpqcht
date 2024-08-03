@@ -194,6 +194,20 @@ struct Role {
     #[serde(default = "default_color")]
     color: Color,
     voice_tier: Option<voice::Tier>,
+    #[serde(flatten)]
+    perms: RolePermissions,
+}
+
+#[derive(serde::Deserialize, serde::Serialize, Default)]
+struct RolePermissions {
+    #[serde(default)]
+    can_manage_users: bool,
+}
+
+impl RolePermissions {
+    fn max(a: Self, b: &Self) -> Self {
+        Self { can_manage_users: std::cmp::max(a.can_manage_users, b.can_manage_users) }
+    }
 }
 
 type ChannelId = u16;
@@ -203,9 +217,10 @@ struct Channel {
     id: ChannelId,
     group: String,
     name: String,
-    roles: Vec<RolePermissions>,
     #[serde(default)]
-    default_permissions: RolePermissions,
+    roles: Vec<ChannelPermissions>,
+    #[serde(default)]
+    default_permissions: ChannelPermissions,
     #[cfg(feature = "voice")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     voice: Option<voice::Channel>,
@@ -219,8 +234,9 @@ fn default_message_length() -> usize {
     1024 * 4
 }
 
-#[derive(serde::Deserialize, serde::Serialize, Clone, Copy, Default)]
-struct RolePermissions {
+#[derive(serde::Deserialize, serde::Serialize, Clone, Copy)]
+struct ChannelPermissions {
+    #[serde(default)]
     id: RoleId,
     #[serde(default = "default_true")]
     view: bool,
@@ -236,7 +252,21 @@ struct RolePermissions {
     max_message_length: usize,
 }
 
-impl RolePermissions {
+impl Default for ChannelPermissions {
+    fn default() -> Self {
+        Self {
+            id: RoleId::default(),
+            view: true,
+            write: true,
+            action_rate_limit: None,
+            moderate: false,
+            manage: false,
+            max_message_length: default_message_length(),
+        }
+    }
+}
+
+impl ChannelPermissions {
     fn max(a: Self, b: &Self) -> Self {
         Self {
             id: std::cmp::max(a.id, b.id),
@@ -327,13 +357,21 @@ impl Config {
         bin_find(&self.channels, id, |c| c.id)
     }
 
-    fn channel_perms(&self, channel: ChannelId, roles: user::Roles) -> Option<RolePermissions> {
+    fn role_perms(&self, role: user::Roles) -> RolePermissions {
+        self.roles
+            .iter()
+            .filter(|r| role.contains(r.id))
+            .map(|r| &r.perms)
+            .fold(RolePermissions::default(), RolePermissions::max)
+    }
+
+    fn channel_perms(&self, channel: ChannelId, roles: user::Roles) -> Option<ChannelPermissions> {
         let channel = self.channel(channel)?;
         let role = channel
             .roles
             .iter()
             .filter(|r| roles.contains(r.id))
-            .fold(channel.default_permissions, RolePermissions::max);
+            .fold(channel.default_permissions, ChannelPermissions::max);
         Some(role)
     }
 
@@ -669,14 +707,17 @@ mod messages {
         crate::Query(q): crate::Query<CreateQery>,
         content: String,
     ) -> Result<(), crate::Error> {
-        let writable = state
-            .config
-            .load()
-            .channel_perms(q.channel, user.roles)
-            .ok_or(crate::Error(crate::SC::NOT_FOUND))?
-            .write;
+        {
+            let perms = state
+                .config
+                .load()
+                .channel_perms(q.channel, user.roles)
+                .ok_or(crate::Error(crate::SC::NOT_FOUND))?;
 
-        ensure!(writable, FORBIDDEN);
+            ensure!(perms.write, FORBIDDEN);
+            ensure!(perms.max_message_length >= content.len(), PAYLOAD_TOO_LARGE);
+            // TODO: rate limiting per channel
+        }
 
         crate::db::with(|db| {
             let compressed = trained_compression::compress(content.as_bytes());
@@ -734,6 +775,7 @@ mod user {
         get: "SELECT name, roles FROM users WHERE pk = ?",
         bump_nonce: "UPDATE users SET nonce = ?1
             WHERE pk = ?2 AND nonce < ?1 + 600 RETURNING name, roles",
+        invite: "INSERT INTO invited (pk, roles) VALUES (?, ?)",
     }
 
     #[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
@@ -1052,26 +1094,21 @@ mod user {
         Ok(())
     }
 
-    pub async fn update() {
-        todo!()
+    #[derive(serde::Deserialize)]
+    pub struct AddToken {
+        pk: crate::Hex<33>,
+        roles: Roles,
     }
 
-    pub async fn delete() {
-        todo!()
-    }
-}
-
-mod other_user {
-    pub async fn get() {
-        todo!()
-    }
-
-    pub async fn update() {
-        todo!()
-    }
-
-    pub async fn delete() {
-        todo!()
+    pub async fn invite(
+        Auth { user, .. }: Auth,
+        crate::StPat(state): crate::St,
+        crate::Json(body): crate::Json<AddToken>,
+    ) -> Result<(), crate::Error> {
+        let perms = state.config.load().role_perms(user.roles);
+        ensure!(perms.can_manage_users, FORBIDDEN);
+        crate::db::with(|db| db.users.invite.insert((body.pk, body.roles)))?;
+        Ok(())
     }
 }
 
@@ -1126,7 +1163,7 @@ mod voice {
 
             pub async fn generate_credentials(
                 &self,
-                tier: super::Tier,
+                _tier: super::Tier,
                 duration: std::time::Duration,
             ) -> Result<super::TurnCreds, crate::Error> {
                 let expiry = std::time::SystemTime::now()
@@ -1620,7 +1657,7 @@ mod hot_reload {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    use axum::routing::{delete, get, patch, post};
+    use axum::routing::{get, patch, post};
 
     let state = match OwnedState::new() {
         Ok(s) => s,
@@ -1642,13 +1679,9 @@ async fn main() {
     }
 
     let app = axum::Router::new()
-        .route("/user/:id", get(other_user::get))
-        .route("/user/:id", patch(other_user::update))
-        .route("/user/:id", delete(other_user::delete))
         .route("/user", get(user::get))
         .route("/user", post(user::create))
-        .route("/user", patch(user::update))
-        .route("/user", delete(user::delete))
+        .route("/user/invite", post(user::invite))
         .route("/messages", get(messages::get))
         .route("/messages", post(messages::create))
         .route("/config", get(config::get))

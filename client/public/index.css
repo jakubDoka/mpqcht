@@ -52,7 +52,8 @@ body>div.poppup {
 	backdrop-filter: blur(5px);
 }
 
-form {
+form,
+#profile-settings>div {
 	margin: auto;
 	background: var(--secondary);
 	display: flex;
@@ -67,6 +68,10 @@ form {
 
 	>input:hover:not(:active) {
 		background: var(--neutral);
+	}
+
+	>input:hover:not(:active)::placeholder {
+		color: var(--secondary);
 	}
 }
 
@@ -92,6 +97,11 @@ input {
 	background: var(--primary);
 	outline: none;
 	border: none;
+	color: var(--primary);
+}
+
+input:not(:hover) {
+	color: var(--font);
 }
 
 [comp=voice-view] {
