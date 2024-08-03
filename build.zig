@@ -51,11 +51,7 @@ pub fn build(b: *std.Build) void {
     var wasm_path = crypto_wasm.addPrefixedOutputFileArg("-femit-bin=", "crypto.wasm");
 
     if (!no_wasm_opt) {
-        const wasm_opt = b.addSystemCommand(&.{
-            "wasm-opt",
-            "-Oz",
-            "--enable-bulk-memory",
-        });
+        const wasm_opt = b.addSystemCommand(&.{ "wasm-opt", "-Oz" });
         wasm_opt.addFileArg(wasm_path);
         wasm_opt.addArg("-o");
         wasm_path = wasm_opt.addOutputFileArg("crypto.wasm");
