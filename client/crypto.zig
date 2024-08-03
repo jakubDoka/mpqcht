@@ -11,8 +11,8 @@ const globs = struct {
 
     pub export var vault: [32]u8 = undefined;
 
-    pub export var ecdsa_vkey: [Ecdsa.PublicKey.compressed_sec1_encoded_length]u8 = undefined;
-    pub export var ecdsa_pkey: [Ecdsa.SecretKey.encoded_length]u8 = undefined;
+    pub export var ecdsa_vkey: [Ecdsa.PublicKey.uncompressed_sec1_encoded_length]u8 = undefined;
+    pub export var ecdsa_skey: [Ecdsa.SecretKey.encoded_length]u8 = undefined;
 };
 
 export fn derive_keys() i32 {
@@ -30,8 +30,8 @@ export fn derive_keys() i32 {
         var ecdsa_seed: [Ecdsa.KeyPair.seed_length]u8 = undefined;
         rng.fill(&ecdsa_seed);
         const keypair = Ecdsa.KeyPair.create(ecdsa_seed) catch return 1;
-        globs.ecdsa_vkey = keypair.public_key.toCompressedSec1();
-        globs.ecdsa_pkey = keypair.secret_key.toBytes();
+        globs.ecdsa_vkey = keypair.public_key.toUncompressedSec1();
+        globs.ecdsa_skey = keypair.secret_key.toBytes();
     }
 
     return 0;

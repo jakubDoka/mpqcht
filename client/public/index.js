@@ -11,6 +11,15 @@ function getStaticElemById(id) {
 
 const inputConstraints = { video: false, audio: false };
 
+/** @type {MediaStream | undefined} */ let prevMedia;
+/** @param {MediaStreamConstraints} constraints */
+async function getUserMedia(constraints) {
+	if (prevMedia) for (const track of prevMedia.getTracks()) track.stop();
+	prevMedia = undefined;
+	if (!constraints.video && !constraints.audio) return undefined;
+	return prevMedia ||= await navigator.mediaDevices.getUserMedia(constraints);
+}
+
 async function hangUp() {
 	VoiceView.inst.close();
 	(await Server.current()).closeVoiceSession();
@@ -164,10 +173,19 @@ class VoiceChat {
 	 * @property {string} to
 	 * @property {B} body */
 
-	/** @typedef {SignalT<"offer", RTCSessionDescriptionInit> |
-	 * SignalT<"candidate", RTCIceCandidateInit>} Signal */
+	/** @typedef {Object} ReadySignal
+	 * @property {"ready"} type */
 
-	/** @typedef {Signal | SignalT<"left" | "joined", User>} SystemSignal
+	/** @typedef {Object} PresentSignal
+	 * @property {"present"} type
+	 * @property {ListenerId} to
+	 * @property {Auth[]} participants */
+
+	/** @typedef {SignalT<"offer", RTCSessionDescriptionInit> |
+	 * SignalT<"candidate", RTCIceCandidateInit> | ReadySignal} Signal */
+
+	/** @typedef {Signal | SignalT<"left" | "joined", User> |
+	 * PresentSignal} SystemSignal
 
 	/** @typedef {Object} RTCSession
 	 * @property {RTCPeerConnection} pc 
@@ -209,37 +227,13 @@ class VoiceChat {
 	/** @param {Server} server @param {ChannelId} chan
 	 * @returns {Promise<string | VoiceChat>} */
 	static async connect(server, chan) {
-		const peers = await server.getVoicePeers(chan);
-		if (typeof peers === "string") return peers;
-
 		const proof = await server.nextProof();
-		/** @type {WebSocket} */ const ws = await new Promise((resolve, reject) => {
-			const ws = new WebSocket(`${server.wsHost}/voice/${chan}/ws/${proof}`);
+		const ws = new WebSocket(`${server.wsHost}/voice/${chan}/ws/${proof}`);
+		const ths = new VoiceChat(ws, server, toHex(await pubkey()), chan);
+		await new Promise((resolve, reject) => {
 			ws.onopen = () => resolve(ws);
 			ws.onerror = (e) => reject(e);
-		});
-
-		const ths = new VoiceChat(ws, server, toHex(await pubkey()), chan);
-
-		await new Promise((resolve, reject) => {
-			const timeout = setTimeout(() => {
-				for (const part of ths.participants.values()) part.pc.close();
-				reject(new Error("timeout"));
-			}, 5000);
-
-			let toConected = peers.length;
-			if (toConected === 0) return resolve(undefined);
-			const onconnect = () => {
-				if (!--toConected) {
-					clearTimeout(timeout);
-					resolve(undefined);
-				}
-			};
-			for (const { id, user } of peers) {
-				ths.createRTC(id, user, true, onconnect);
-			}
-		});
-
+		})
 		return ths;
 	}
 
@@ -258,6 +252,18 @@ class VoiceChat {
 		return this.#turnCreds = creds;
 	}
 
+	/** @param {UserPk} id */
+	removeRTC(id) {
+		const session = this.participants.get(id); if (!session) return;
+		this.participants.delete(id);
+		session.pc.onnegotiationneeded = null;
+		session.pc.onicecandidate = null;
+		session.pc.onconnectionstatechange = null;
+		session.pc.onsignalingstatechange = null
+		session.pc.ontrack = null;
+		VoiceView.inst.removePane(id);
+	}
+
 	/** @param {ListenerId} other
 	 * @param {User} user
 	 * @param {boolean} polite
@@ -266,8 +272,6 @@ class VoiceChat {
 		const creds = await this.getCreds();
 		if (typeof creds === "string") errorToast(creds);
 		const { username, password } = creds;
-
-		console.log(this.#server.turnHost);
 
 		/** @type {Participant} */
 		const session = {
@@ -310,9 +314,12 @@ class VoiceChat {
 		};
 
 		session.pc.onconnectionstatechange = () => {
-			if (session.pc.connectionState === "closed")
-				this.participants.delete(from);
+			if (session.pc.connectionState === "closed") this.removeRTC(other);
 		};
+
+		session.pc.onsignalingstatechange = () => {
+			if (session.pc.signalingState === "closed") this.removeRTC(other);
+		}
 
 		session.pc.ontrack = async ({ track, streams: [stream] }) => {
 			if (!stream) return console.warn("stream was null");
@@ -329,73 +336,79 @@ class VoiceChat {
 
 	/** @param {Participant} session @param {MediaStreamConstraints} constraints */
 	async updateSessionTracks(session, constraints) {
-		const stream = await navigator.mediaDevices.getUserMedia(constraints).catch(() => undefined);
+		const stream = await getUserMedia(constraints);
 		for (const sender of session.tracks) session.pc.removeTrack(sender);
-		session.tracks = stream?.getTracks()?.map(track => session.pc.addTrack(track, stream)) || [];
+		session.tracks = stream?.getTracks()
+			?.map(track => session.pc.addTrack(track, stream)) || [];
 		this.mountMe(VoiceView.inst.addPane("me"), stream);
 	}
 
 	/** @param {MediaStreamConstraints} constraints */
 	async updateAllSessionTracks(constraints) {
 		const me = VoiceView.inst.addPane("me");
-		const stream = await navigator.mediaDevices.getUserMedia(constraints).catch(() => undefined);
+		const stream = await getUserMedia(constraints);
 		for (const session of this.participants.values()) {
 			for (const sender of session.tracks) {
 				me.cachedRemoveCb({ track: sender.track ?? never() });
 				session.pc.removeTrack(sender);
 			}
-			session.tracks = stream?.getTracks()?.map(track => session.pc.addTrack(track, stream)) || [];
+			session.tracks = stream?.getTracks()
+				?.map(track => session.pc.addTrack(track, stream)) || [];
 		}
 		this.mountMe(me, stream);
 	}
 
 	/** @param {VoicePane} me @param {MediaStream | undefined} stream */
-	mountMe(me, stream) {
+	async mountMe(me, stream) {
 		me.name.textContent = "you";
-		if (stream) for (const track of stream.getTracks()) me.addTrack(track, stream);
 		me.audio.muted = true;
+		if (stream) for (const track of stream.getTracks())
+			await me.addTrack(track, stream);
 	}
 
-	/** @param {SystemSignal} e */
-	async handleWsMessage({ type, from: to, body }) {
-		const from = this.#id, p = this.participants.get(to);
+	/** @param {SystemSignal} msg */
+	async handleWsMessage(msg) {
+		const from = this.#id;
 		/** @param {UserPk} to */
 		const warnMissingP = (to) => console.warn("missing participant", to);
-		switch (type) {
-			case "left": {
-				this.participants.get(to)?.pc?.close();
-				this.participants.delete(to)
-				VoiceView.inst.removePane(to);
+		switch (msg.type) {
+			case "left": this.removeRTC(msg.from); break;
+			case "present": {
+				for (const { id, user } of msg.participants)
+					this.createRTC(id, user, true);
+				this.send({ type: "ready" });
 			} break;
-			case "joined": {
-				this.createRTC(to, body, false);
-			} break;
+			case "joined": this.createRTC(msg.from, msg.body, false); break;
 			case "offer": {
-				if (!p) return warnMissingP(to);
-				const offerCollision = body.type === "offer" &&
+				const p = this.participants.get(msg.from);
+				if (!p) return warnMissingP(msg.from);
+				const offerCollision = msg.body.type === "offer" &&
 					(p.makingOffer || p.pc.signalingState !== "stable");
 
 				p.ignoreOffer = offerCollision && !p.polite;
 				if (p.ignoreOffer) return console.warn("ignoring offer");
 
-				await p.pc.setRemoteDescription(body);
-				if (body.type === "offer") {
+				await p.pc.setRemoteDescription(msg.body);
+				if (msg.body.type === "offer") {
 					await p.pc.setLocalDescription();
-					this.send({ type: "offer", from, to, body: p.pc.localDescription ?? never() });
+					this.send({ type: "offer", from, to: msg.from, body: p.pc.localDescription ?? never() });
 				}
 
+				p.polite = true;
 				p.onconnect?.();
 				p.onconnect = undefined;
 			} break;
 			case "candidate": {
-				if (!p) return warnMissingP(to);
+				const p = this.participants.get(msg.from);
+				if (!p) return warnMissingP(msg.from);
 				try {
-					await p.pc.addIceCandidate(body);
+					await p.pc.addIceCandidate(msg.body);
 				} catch (e) {
 					if (!p.ignoreOffer) throw e;
 				}
 			} break;
-			default: console.warn("unknown signal type", type);
+			case "ready": console.warn("there is a bug in the server"); break;
+			default: console.warn("unknown signal type", msg);
 		}
 	}
 
@@ -492,7 +505,7 @@ class Server {
 
 		chan ??= channel();
 		if (typeof chan === "string") chan = parseInt(chan);
-		if (typeof chan === "number") ChannelView.inst.selectChannel(chan);
+		if (typeof chan === "number") await ChannelView.inst.selectChannel(chan);
 	}
 
 	async nextProof() {
@@ -751,16 +764,19 @@ const [page, server, channel, poppup, invoice] =
 
 /** @type {WebAssembly.Instance} */
 let wasmInstance;
+/** @type {Promise<WebAssembly.Instance>} */
+let wasmInstancePromise;
 /** @returns {Promise<WebAssembly.Instance>} */
 async function getCrypto() {
-	return wasmInstance ||= await fetch("libcrypto.a.o")
+	wasmInstancePromise ||= fetch("crypto.wasm")
 		.then(r => r.arrayBuffer())
 		.then(b => WebAssembly.instantiate(b, {
 			env: {
 				"__linear_memory": new WebAssembly.Memory({ initial: 1 }),
 				"__stack_pointer": new WebAssembly.Global({ value: "i32", mutable: true }, 0),
 			}
-		})).then(i => i.instance);
+		})).then(i => i.instance)
+	return wasmInstance ||= await wasmInstancePromise;
 }
 
 const ecdsaAlg = { name: "ECDSA", namedCurve: "P-256" };
@@ -769,32 +785,67 @@ const aesAlg = { name: "AES-GCM", length: 256 };
 async function deriveKeys(username, password) {
 	const cryptoLib = await getCrypto();
 
-	console.log(cryptoLib);
-
 	const {
-		username: username_loc, username_len,
-		password: passsword_loc, password_len,
-		derive_keys, clear_secrets,
+		username: username_loc, username_len, password: passsword_loc, password_len,
+		derive_keys, clear_secrets, memory, ecdsa_vkey, ecdsa_skey, vault: vault_sec,
 	} = cryptoLib.exports;
 
+	if (!(username_len instanceof WebAssembly.Global)) never();
+	if (!(password_len instanceof WebAssembly.Global)) never();
+
 	if (typeof derive_keys !== "function") never();
-	if (derive_keys() !== 0) never();
+	if (typeof clear_secrets !== "function") never();
 
-	const keys = derive_keys();
-	// I honestly hate you so much W3C
-	const jwk = {
-		crv: "P-256",
-		d: encodeB64UrlSafe(keys.skey),
-		key_ops: ["sign"],
-		kty: "EC",
-		x: encodeB64UrlSafe(new Uint8Array(keys.vkey.buffer, 1, 32)),
-		y: encodeB64UrlSafe(new Uint8Array(keys.vkey.buffer, 33, 32)),
-	};
+	if (!(memory instanceof WebAssembly.Memory)) never();
+	const view = new DataView(memory.buffer);
 
-	const publicKey = await crypto.subtle.importKey("raw", keys.vkey, ecdsaAlg, true, ["verify"]);
-	const privateKey = await crypto.subtle.importKey("jwk", jwk, ecdsaAlg, false, ["sign"]);
-	const vault = await crypto.subtle.importKey("raw", keys.vault, aesAlg, false, ["encrypt", "decrypt"]);
-	return { signing: { publicKey, privateKey }, vault }
+	/** @param {WebAssembly.ExportValue} g @param {number} len @return {Uint8Array} */
+	function globalView(g, len, offset = 0) {
+		if (!(memory instanceof WebAssembly.Memory)) never();
+		if (!(g instanceof WebAssembly.Global)) never();
+		return new Uint8Array(memory.buffer, g.value + offset, len);
+	}
+
+	/** @param {Uint8Array} dst @param {string} src */
+	function cpy(dst, src) {
+		for (let i = 0; i < src.length; i++) dst[i] = src.charCodeAt(i);
+	}
+
+	try {
+		cpy(globalView(username_loc, 32), username);
+		view.setUint32(username_len.value, username.length, true);
+		cpy(globalView(passsword_loc, 256), password);
+		view.setUint32(password_len.value, password.length, true);
+
+		if (derive_keys() !== 0) never();
+
+		const vault_key = globalView(vault_sec, 32);
+
+		// I honestly hate you so much W3C
+		const jwk = {
+			crv: "P-256",
+			d: encodeB64UrlSafe(globalView(ecdsa_skey, 32)),
+			key_ops: ["sign"],
+			kty: "EC",
+			x: encodeB64UrlSafe(globalView(ecdsa_vkey, 32, 1)),
+			y: encodeB64UrlSafe(globalView(ecdsa_vkey, 32, 33)),
+		};
+
+		const vkey = globalView(ecdsa_vkey, 65);
+		const sc = crypto.subtle;
+		const publicKey = await sc.importKey("raw", vkey, ecdsaAlg, true, ["verify"]);
+		const privateKey = await sc.importKey("jwk", jwk, ecdsaAlg, false, ["sign"]);
+		const vault = await sc.importKey("raw", vault_key, aesAlg, false,
+			["encrypt", "decrypt"]);
+
+		return { signing: { publicKey, privateKey }, vault }
+	} catch (e) {
+		console.error(e);
+		throw new Error("error deriving keys");
+	} finally {
+		clear_secrets();
+	}
+
 }
 
 const url64TrimPad = /=+$/g, url64Plus = /\+/g, url64Slash = /\//g;
@@ -1385,7 +1436,6 @@ class VoicePane extends ComponentBase {
 				this.updateAudioVis();
 			} break;
 			case "video": {
-				console.log("video");
 				this.video.hidden = false;
 				this.pfp.hidden = true;
 				this.video.srcObject = stream;

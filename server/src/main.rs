@@ -44,7 +44,6 @@ extern crate rusqlite as sqlt;
 
 use {
     self::{sse::Event, user::RoleId},
-    arc_swap::access::Access,
     axum::{
         extract::{Json, Query, State as StPat},
         http::StatusCode as SC,
@@ -1135,7 +1134,7 @@ mod voice {
                     .unwrap()
                     .saturating_add(duration)
                     .as_secs();
-                let username = format!("{expiry}:{tier}");
+                let username = format!("{expiry}");
                 let mut sha = self.secret.clone();
                 sha.update(username.as_bytes());
                 use base64::Engine;
@@ -1183,12 +1182,18 @@ mod voice {
         to: crate::Hex<33>,
     }
 
+    #[derive(serde::Serialize, serde::Deserialize, Debug)]
+    struct PeekType<'a> {
+        r#type: &'a str,
+    }
+
     #[allow(non_camel_case_types)]
     #[derive(serde::Serialize, serde::Deserialize)]
     #[serde(tag = "type")]
     enum SystemEvent {
         left { to: crate::Hex<33>, from: crate::Hex<33>, body: User },
         joined { to: crate::Hex<33>, from: crate::Hex<33>, body: User },
+        present { to: crate::Hex<33>, participants: Vec<Auth> },
     }
 
     pub async fn ws(
@@ -1228,15 +1233,29 @@ mod voice {
 
         Ok(ws.on_upgrade(move |mut socket| async move {
             let session = &sessions[session_index];
+
+            {
+                let peers = session
+                    .peers
+                    .read()
+                    .unwrap()
+                    .iter()
+                    .map(|(&id, peer)| Auth { id: crate::Hex(id), user: peer.auth.user })
+                    .collect::<Vec<_>>();
+                if socket
+                    .send(Message::Text(to_message(SystemEvent::present {
+                        to: auth.id,
+                        participants: peers,
+                    })))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
+
             let mut recv = {
                 let mut peers = session.peers.write().unwrap();
-                for (&id, peer) in peers.iter() {
-                    _ = peer.sender.try_send(to_message(SystemEvent::joined {
-                        to: crate::Hex(id),
-                        from: auth.id,
-                        body: auth.user,
-                    }));
-                }
                 let (sender, receiver) = mpsc::channel(10);
                 peers.insert(auth.id.0, Peer { auth, sender });
                 receiver
@@ -1257,6 +1276,20 @@ mod voice {
                 if match event {
                     Event::Recv(msg) => socket.send(Message::Text(msg)).await.is_err(),
                     Event::Send(msg) => {
+                        if let Ok(PeekType { r#type: "ready" }) = serde_json::from_str(&msg) {
+                            let peers = session.peers.read().unwrap();
+                            for (&id, peer) in peers.iter() {
+                                if id == auth.id.0 {
+                                    continue;
+                                }
+                                _ = peer.sender.try_send(to_message(SystemEvent::joined {
+                                    from: auth.id,
+                                    to: crate::Hex(id),
+                                    body: auth.user,
+                                }));
+                            }
+                            continue;
+                        }
                         let Ok(PeekTo { to }) = serde_json::from_str(&msg) else { break };
                         let peer =
                             session.peers.read().unwrap().get(&to.0).map(|s| s.sender.clone());
@@ -1413,19 +1446,24 @@ mod sse {
 }
 
 #[cfg(not(feature = "tls"))]
-async fn serve(addr: std::net::SocketAddr, app: axum::Router, _: State) {
-    let socket = tokio::net::TcpListener::bind(addr).await.unwrap();
+async fn serve(port: u16, app: axum::Router, _: State) {
+    let socket = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await.unwrap();
     axum::serve(socket, app).await.unwrap();
 }
 
 #[cfg(feature = "tls")]
-async fn serve(addr: std::net::SocketAddr, app: axum::Router, state: State) {
+async fn serve(port: u16, app: axum::Router, state: State) {
     use axum_server::tls_rustls::RustlsConfig;
 
     let config = state.config.load();
-    let config = RustlsConfig::from_pem_file(&config.cert, &config.key).await.unwrap();
+    let config = RustlsConfig::from_pem_file(&config.cert, &config.key).await.unwrap_or_else(|e| {
+        panic!("error loading tls config ({} {}): {e}", config.cert, config.key)
+    });
 
-    axum_server::bind_rustls(addr, config).serve(app.into_make_service()).await.unwrap();
+    axum_server::bind_rustls((Ipv4Addr::UNSPECIFIED, port).into(), config)
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
 }
 
 #[derive(Clone)]
@@ -1451,8 +1489,8 @@ impl tower_service::Service<axum::http::Request<axum::body::Body>> for StaticFil
                 return Ok(status(crate::SC::NOT_ACCEPTABLE));
             }
 
-            let mut path = format!(".{}", req.uri().path());
-            if path == "./" {
+            let mut path = format!("{}/{}", state.config.load().public, req.uri().path());
+            if req.uri().path() == "/" {
                 path.push_str("index.html");
             }
 
@@ -1466,8 +1504,6 @@ impl tower_service::Service<axum::http::Request<axum::body::Body>> for StaticFil
             if cfg!(feature = "gzip") {
                 path.push_str(".gz");
             }
-
-            path.insert_str(0, state.config.load().public.as_str());
 
             // we only load small files
             Ok(match std::fs::read(path) {
@@ -1629,6 +1665,7 @@ async fn main() {
     #[cfg(feature = "hot-reload")]
     let app = app.route("/hot-reload", get(hot_reload::get));
 
-    serve((Ipv4Addr::LOCALHOST, state.config.load().port).into(), app.with_state(state), state)
-        .await;
+    let app = app.layer(tower_http::cors::CorsLayer::permissive());
+
+    serve(state.config.load().port, app.with_state(state), state).await;
 }

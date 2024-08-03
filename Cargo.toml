@@ -7,12 +7,8 @@ members = [
 ]
 
 [profile.release]
-opt-level = "z"
+opt-level = 3
 panic = "abort"
 lto = true
 strip = true
 codegen-units = 1
-
-[profile.minimal-size]
-inherits = "release"
-opt-level = "z"
