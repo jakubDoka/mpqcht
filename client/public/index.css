@@ -3,6 +3,7 @@ html {
 	--medium-gap: 10px;
 
 	color: var(--font);
+
 }
 
 html[data-theme=dark] {

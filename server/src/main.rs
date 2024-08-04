@@ -194,7 +194,7 @@ struct Role {
     #[serde(default = "default_color")]
     color: Color,
     voice_tier: Option<voice::Tier>,
-    #[serde(flatten)]
+    #[serde(default)]
     perms: RolePermissions,
 }
 

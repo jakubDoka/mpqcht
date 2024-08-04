@@ -12,7 +12,7 @@
 		<form onsubmit="loginHandler(this); return false;">
 			<input type="text" autocomplete="username" name="username" placeholder="username..." required
 				maxlength="32">
-			<input type="password" autocomplete="current-password" name="password" placeholder="password..." required
+			<input type="password" autocomplete="current-password" name="password" placeholder="password..."
 				maxlength="256">
 			<input type="submit" value="login">
 		</form>
@@ -53,6 +53,14 @@
 		<form onsubmit="inviteUserHandler(this); event.preventDefault(); return false;"
 			style="width: min(400px, calc(100% - 40px))">
 			<input type="text" name="pubkey" pattern="[0-9a-fA-F]{66}" placeholder="pubkey..." required>
+			<div style="
+				background: var(--primary);
+				padding: var(--small-gap);
+				border-radius: var(--small-gap);
+				display: flex;
+			">
+				Roles
+			</div>
 			<input type="submit" value="add">
 			<input type="button" value="cancel" onmousedown="hidePoppup('invite-user')">
 
@@ -293,7 +301,8 @@
 		">
 			<div id="name"></div>
 			<div>
-				<button onmousedown="showPoppup('invite-user')" style="padding: 0; border-radius: 0;">
+				<button id="invite-btn" hidden onmousedown="showPoppup('invite-user')"
+					style="padding: 0; border-radius: 0;">
 					<wbr comp="mpqcht-add-user" height="24">
 				</button>
 			</div>

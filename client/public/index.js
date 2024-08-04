@@ -1,5 +1,22 @@
 /// @ts-check
 
+/** @param {Object} obj */
+function zeroOut(obj) {
+	for (const key in obj) {
+		switch (typeof obj[key]) {
+			case "number": obj[key] = 0; break;
+			case "boolean": obj[key] = false; break;
+			case "bigint": obj[key] = 0n; break;
+			default: console.error("unknown type", typeof obj[key]);
+		}
+	}
+}
+
+/** @template {Record<string, any>} T @param {T} acc @param {T} b @returns {void} */
+function maxOf(acc, b) {
+	for (const key in acc) acc[key] = acc[key] > b[key] ? acc[key] : b[key];
+}
+
 // ## DOM
 
 /** @template {HTMLElement} T @param {string} id @returns T */
@@ -9,6 +26,16 @@ function getStaticElemById(id) {
 
 // ## EVENTS
 
+/** @type {MediaTrackConstraints} */
+const audioSettings = {
+	autoGainControl: true,
+	echoCancellation: true,
+	noiseSuppression: true,
+	channelCount: 2,
+};
+const enabledConstarainst = { video: true, audio: audioSettings };
+
+/** @type {MediaStreamConstraints} */
 const inputConstraints = { video: false, audio: false };
 
 /** @type {MediaStream | undefined} */ let prevMedia;
@@ -33,7 +60,8 @@ function toggleMic(elem) { toggleInput("audio", elem); }
 
 /** @param {"audio" | "video"} kind @param {HTMLButtonElement} elem */
 async function toggleInput(kind, elem) {
-	inputConstraints[kind] = !inputConstraints[kind];
+	inputConstraints[kind] =
+		inputConstraints[kind] ? false : enabledConstarainst[kind];
 	await (await Server.current()).voice?.updateAllSessionTracks(inputConstraints);
 	for (const child of /** @type {*} */(elem.children)) {
 		child.toggleAttribute("hidden");
@@ -57,11 +85,11 @@ const addServerHint = getStaticElemById("add-server-hint"),
 	addServerPubkey = getStaticElemById("add-server-pubkey");
 /** @param {HTMLFormElement} elem */
 async function addServerHandler(elem) {
-	const url = elem.elements['url'].value;
-	const host = new URL(url).hostname;
+	const url = new URL(elem.elements['url'].value);
+	const host = url.hostname;
 	const name = elem.elements['username'].value;
 
-	let resp = await fetch(`${url}/user`,
+	let resp = await fetch(`${url.toString()}user`,
 		{ headers: { "Authorization": "Bearer " + await nextProof(host) } })
 		.catch(e => e + "");
 
@@ -455,14 +483,18 @@ class Server {
 	/** @type {number} */ #sseBackof = 1;
 	/** @type {AbortController | undefined} */ messageAbort;
 
-	/** @param {string} host @param {ServerConfig} config @param {User} profile */
-	constructor(host, config, profile) {
+	/** @param {string} host
+	 * @param {ServerConfig} config
+	 * @param {User} profile
+	 * @param {string} pubkey */
+	constructor(host, config, profile, pubkey) {
 		this.host = new URL(host).origin;
 		this.wsHost = Server.#hostToWs(host);
 		this.turnHost = config.turn || Server.#hostToTurn(host);
 		this.hostname = new URL(host).hostname;
 		this.config = config;
-		this.profile = profile
+		this.profile = profile;
+		this.pubkey = pubkey;
 
 		this.#initSse();
 	}
@@ -492,7 +524,7 @@ class Server {
 		if (typeof config === "string") return config;
 		if (typeof profile === "string") return profile;
 
-		this.cache.set(url, server = new Server(url, config, profile));
+		this.cache.set(url, server = new Server(url, config, profile, toHex(await pubkey())));
 		withServers(servers => servers.add(url));
 		return server;
 	}
@@ -518,6 +550,39 @@ class Server {
 		chan ??= channel();
 		if (typeof chan === "string") chan = parseInt(chan);
 		if (typeof chan === "number") await ChannelView.inst.selectChannel(chan);
+	}
+
+	/** @returns {boolean} */
+	isRoot() {
+		if (this.config.is_root !== undefined) return this.config.is_root;
+		return this.config.is_root = this.config.roots.includes(this.pubkey);
+	}
+
+	static maxRolePerms = { can_manage_users: true };
+	/** @returns {RolePermissions} */
+	permissions() {
+		if (this.isRoot()) return Server.maxRolePerms;
+		if (this.config.computed_perms) return this.config.computed_perms;
+		const base = Object.assign({}, Server.maxRolePerms); zeroOut(base);
+		for (const role of this.config.roles) {
+			if (!this.profile.roles.includes(role.id)) continue;
+			maxOf(base, role.perms);
+		}
+		return this.config.computed_perms = base;
+	}
+
+	static maxChannelPerms =
+		{ id: 0, view: true, write: true, moderate: true, manage: true };
+	/** @param {Channel} channel @returns {ChannelPermissions} */
+	channelPermissions(channel) {
+		if (this.isRoot()) return Server.maxChannelPerms;
+		if (channel.computed_permissions) return channel.computed_permissions;
+		const base = channel.default_permissions;
+		for (const role of channel.roles) {
+			if (!this.profile.roles.includes(role.id)) continue;
+			maxOf(base, role);
+		}
+		return channel.computed_permissions = base;
 	}
 
 	async nextProof() {
@@ -644,12 +709,16 @@ class Server {
 /** @typedef {number} RoleId */
 /** @typedef {number} ChannelId */
 
+/** @typedef {Object} RolePermissions
+ * @property {boolean} can_manage_users */
+
 /** @typedef {Object} Role
  * @property {RoleId} id
  * @property {string} name
- * @property {string} color */
+ * @property {string} color
+ * @property {RolePermissions} perms */
 
-/** @typedef {Object} RolePermissions
+/** @typedef {Object} ChannelPermissions
  * @property {RoleId} id
  * @property {boolean} view
  * @property {boolean} write
@@ -664,9 +733,9 @@ class Server {
  * @property {number} id
  * @property {string} group
  * @property {string} name
- * @property {RolePermissions[]} roles
- * @property {RolePermissions} default_permissions
- * @property {RolePermissions} [computed_permissions]
+ * @property {ChannelPermissions[]} roles
+ * @property {ChannelPermissions} default_permissions
+ * @property {ChannelPermissions} [computed_permissions]
  * @property {VoiceChannel} [voice] */
 
 /** @typedef {Object} Theme
@@ -685,6 +754,8 @@ class Server {
  * @property {Theme} dark_theme
  * @property {Theme} light_theme
  * @property {Channel[]} channels
+ * @property {RolePermissions} [computed_perms]
+ * @property {boolean} [is_root] 
  * @property {Role[]} roles */
 
 /** @param {Theme} theme */
@@ -1038,17 +1109,6 @@ class ComponentBase {
 
 // ## REGISTRATION
 
-/** @param {Channel} channel @param {RoleId[]} roles @returns {RolePermissions} */
-function myChannelPermissions(channel, roles) {
-	if (channel.computed_permissions) return channel.computed_permissions;
-	const base = channel.default_permissions;
-	for (const role of channel.roles) {
-		if (!roles.includes(role.id)) continue;
-		for (const key in role) base[key] = Math.max(base[key], role[key]);
-	}
-	return channel.computed_permissions = base;
-}
-
 class NavBar extends ComponentBase {
 	/** @type {NavBar} */ static inst;
 	/** @param {HTMLElement} elem */
@@ -1088,6 +1148,7 @@ class ChannelList extends ComponentBase {
 		super(elem);
 		this.name = this.getElem("name");
 		this.groups = this.getElem("groups");
+		this.inviteBtn = this.getElem("invite-btn");
 		/** @type {Map<ChannelId, ChannelSelect>} */
 		this.channelMap = new Map();
 
@@ -1111,11 +1172,12 @@ class ChannelList extends ComponentBase {
 	selectServer(server) {
 		this.name.textContent = server.config.hostname;
 		this.groups.innerHTML = "";
+		this.inviteBtn.hidden = !server.permissions().can_manage_users;
 		this.channelMap.clear();
 		applyTheme(server.config.dark_theme);
 
 		for (const channel of server.config.channels) {
-			if (!myChannelPermissions(channel, server.profile.roles).view) continue;
+			if (!server.channelPermissions(channel).view) continue;
 
 			let group = /** @type {HTMLElement} */ (this.groups.querySelector(`:scope > [name=${channel.group}]`));
 			if (!group) {
@@ -1449,6 +1511,7 @@ class VoicePane extends ComponentBase {
 			} break;
 			case "video": {
 				this.video.hidden = false;
+				this.video.muted = true;
 				this.pfp.hidden = true;
 				this.video.srcObject = stream;
 				this.elem.classList.add("has-video");
@@ -1471,7 +1534,6 @@ class VoicePane extends ComponentBase {
 		window.requestAnimationFrame(this.cachedCb);
 	}
 }
-
 
 defComp(
 	BitMage,
