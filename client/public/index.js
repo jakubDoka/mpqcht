@@ -60,13 +60,23 @@ function toggleMic(elem) { toggleInput("audio", elem); }
 
 /** @param {"audio" | "video"} kind @param {HTMLButtonElement} elem */
 async function toggleInput(kind, elem) {
+	const enable = !inputConstraints[kind];
 	inputConstraints[kind] =
-		inputConstraints[kind] ? false : enabledConstarainst[kind];
+		enable ? enabledConstarainst[kind] : false;
 	await (await Server.current()).voice?.updateAllSessionTracks(inputConstraints);
 	for (const child of /** @type {*} */(elem.children)) {
 		child.toggleAttribute("hidden");
 	}
 	elem.classList.toggle("disabled");
+
+	switch (kind) {
+		case "audio": {
+			VoiceView.inst.addPane("me").muted.classList.toggle("hidden", enable);
+		} break;
+		case "video": {
+			VoiceView.inst.addPane("me").elem.classList.toggle("has-video", enable);
+		} break;
+	}
 }
 
 /** @param {HTMLFormElement} elem */
@@ -1417,6 +1427,7 @@ class VoiceView extends ComponentBase {
 	close() {
 		this.elem.hidden = true;
 		ChannelView.inst.elem.hidden = false;
+		this.panes.innerHTML = "";
 		invoice("");
 	}
 
@@ -1424,6 +1435,7 @@ class VoiceView extends ComponentBase {
 	async open(chanId) {
 		this.elem.hidden = false;
 		const server = await Server.current();
+		this.addPane("me");
 		server.openVoiceSession(chanId);
 		invoice("true");
 	}
@@ -1473,8 +1485,6 @@ class VoicePane extends ComponentBase {
 			} break;
 			case "video": {
 				this.video.srcObject = null;
-				this.video.hidden = true;
-				this.pfp.hidden = false;
 				this.elem.classList.remove("has-video");
 			} break;
 			default: console.error("unknown track kind", track.kind);
@@ -1511,9 +1521,7 @@ class VoicePane extends ComponentBase {
 				this.updateAudioVis();
 			} break;
 			case "video": {
-				this.video.hidden = false;
 				this.video.muted = true;
-				this.pfp.hidden = true;
 				this.video.srcObject = stream;
 				this.elem.classList.add("has-video");
 			} break;

@@ -109,23 +109,17 @@
 	<div style="position: relative;">
 		<div id="pfp" style="
 			margin: auto;
-			display: flex;
 			color: var(--primary);
 		">
 			<wbr comp="mpqcht-logo" height="64px">
 		</div>
-		<video id="video" hidden autoplay muted></video>
+		<video id="video" autoplay muted style="
+			overflow: hidden;
+			object-fit: cover;
+		"></video>
 		<audio id="audio" autoplay></audio>
-		<div id="name" style="
-			position: absolute;
-			left: var(--small-gap);
-			bottom: calc(var(--small-gap) / 2);
-		">foobar</div>
-		<wbr id="muted" comp="mpqcht-microphone-disabled" height="18" style="
-			position: absolute;
-			bottom: var(--small-gap);
-			right: var(--small-gap);
-		">
+		<div id="name" class="info" style="left: var(--small-gap);">foobar</div>
+		<wbr id="muted" comp="mpqcht-microphone-disabled" height="18" class="info" style="right: var(--small-gap);">
 	</div>
 </template>
 
@@ -155,7 +149,7 @@
 		</div>
 		<div style="display: flex">
 			<div style="
-				background-color: var(--secondary);
+				background-color: color-mix(in srgb, var(--primary), black 40%);
 				padding: var(--medium-gap);
 				border-radius: var(--medium-gap);
 				display: flex;

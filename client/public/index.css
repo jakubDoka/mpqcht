@@ -24,6 +24,21 @@ html[data-theme=dark] {
 		display: none !important;
 	}
 
+	font-family: ui-sans-serif,
+	system-ui,
+	-apple-system,
+	BlinkMacSystemFont,
+	Segoe UI,
+	Roboto,
+	Helvetica Neue,
+	Arial,
+	Noto Sans,
+	sans-serif,
+	"Apple Color Emoji",
+	"Segoe UI Emoji",
+	Segoe UI Symbol,
+	"Noto Color Emoji";
+
 	scrollbar-color: var(--secondary) var(--primary);
 }
 
@@ -128,6 +143,7 @@ input:not(:hover) {
 		background: none;
 		color: var(--font);
 	}
+
 }
 
 [comp=voice-pane] {
@@ -148,19 +164,43 @@ input:not(:hover) {
 	outline-offset: 6px;
 	color: var(--primary);
 
+	#pfp {
+		display: flex;
+	}
+
 	video {
 		width: var(--width);
 		height: var(--height);
 		border-radius: var(--medium-gap);
+		display: none;
 	}
 
 	svg.hidden {
 		opacity: 0;
 	}
+
+	.info {
+		position: absolute;
+		bottom: var(--small-gap);
+		padding: calc(var(--small-gap) / 2);
+	}
 }
 
 [comp=voice-pane].has-video {
 	color: var(--font);
+
+	#pfp {
+		display: none;
+	}
+
+	video {
+		display: flex;
+	}
+
+	.info {
+		background: color-mix(in srgb, var(--primary), transparent 40%);
+		border-radius: var(--small-gap);
+	}
 }
 
 [comp=voice-pane].talking {
