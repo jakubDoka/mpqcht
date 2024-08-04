@@ -402,6 +402,7 @@ class VoiceChat {
 	async mountMe(me, stream) {
 		me.name.textContent = "you";
 		me.audio.muted = true;
+		me.video.style.transform = 'scale(-1, 1)';
 		if (stream) for (const track of stream.getTracks())
 			await me.addTrack(track, stream);
 	}
