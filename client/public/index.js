@@ -17,6 +17,370 @@ function maxOf(acc, b) {
 	for (const key in acc) acc[key] = acc[key] > b[key] ? acc[key] : b[key];
 }
 
+// ## MARKDOWN
+
+/** @template {any} T @param {T[]} list @returns {T | undefined} */
+function lastElem(list) {
+	if (list.length > 0) return list[list.length - 1];
+	return undefined;
+}
+
+const re = /\d/g;
+
+
+/** @typedef {Object} TokenMatch
+ * @property {string} kind
+ * @property {number} start
+ * @property {number} end
+ * */
+/// token is passed into this for post processing
+/** @callback TokenFinalizer
+ * @param {string} source
+ * @param {TokenMatch} match
+ * @return {void}
+ */
+const builtinPatterns = [
+	"ignored",
+	"identifier",
+	"keyword",
+	"number",
+	"string",
+	"punctation",
+	"comment",
+];
+/** @typedef {Object} Lexer
+ * @property {RegExp} [compiled]
+ * @property {Record<string, RegExp>} patterns
+ * @property {TokenFinalizer} [finalizer] */
+/** @type {Record<string, Lexer>} */
+const languages = {
+	rs: {
+		patterns: {
+			ignored: /\s+/,
+			keyword: /\b(as|break|const|continue|crate|else|enum|extern|false|fn|for|if|impl|in|let|loop|match|mod|move|mut|pub|ref|return|self|Self|static|struct|super|trait|true|type|unsafe|use|where|while|async|await|dyn)\b/,
+			identifier: /[a-zA-Z][a-zA-Z0-9]*/,
+			number: /[0-9]+/,
+			string: /"([^"]|\\")*"|'([^']|\\')*'/,
+			multilineComment: /\/\*/,
+			comment: /\/\/[^\n]*/,
+			punctation: /[?:^\+\-*&^%$#@!(){}\[\]\.,/:=><]/,
+		},
+		finalizer: (source, match) => {
+			if (match.kind === "multilineComment") {
+				let depth = 1;
+				const slash = '/'.charCodeAt(0), star = '*'.charCodeAt(0);
+				while (depth) {
+					switch (source.charCodeAt(match.end)) {
+						case slash: if (source.charCodeAt(match.end + 1) === star) {
+							match.end++;
+							depth += 1;
+						} break;
+						case star: if (source.charCodeAt(match.end + 1) === slash) {
+							match.end++;
+							depth -= 1;
+						} break;
+					}
+					match.end++;
+				}
+				match.kind = "comment";
+				return;
+			}
+		},
+	},
+};
+
+/** @type {Record<string, string>} */ let theme;
+/** @returns {Record<string, string>} */
+function getHighlightTheme() {
+	if (theme) return theme;
+	const properties = document.body.computedStyleMap();
+	/** @type { Record<string, string>} */ const records = {};
+	for (const [key, value] of properties) {
+		const pat = "--code-theme-";
+		if (!key.startsWith(pat)) continue;
+		records[key.slice(pat.length)] = value.toString();
+	}
+	console.log(records);
+	return theme = records;
+}
+
+class MarkdownRenderer {
+	static #instance = new MarkdownRenderer();
+
+	#hash = MarkdownRenderer.#tok('#');
+	#star = MarkdownRenderer.#tok('*');
+	#tilde = MarkdownRenderer.#tok('~');
+	#tick = MarkdownRenderer.#tok('`');
+	#newline = MarkdownRenderer.#tok('\n');
+	#gt = MarkdownRenderer.#tok('>');
+	#backclash = MarkdownRenderer.#tok('\\');
+
+	/** @type {number} */ #i;
+	/** @type {number} */ #t;
+	/** @type {HTMLDivElement} */ #container;
+	/** @type {HTMLParagraphElement} */ #paragraph;
+	/** @type {HTMLElement[]} */ #quoteStack = [];
+	/** @type {HTMLElement[]} */ #styleStack = [];
+	/** @type {string} */ #content;
+	/** @type {boolean} */ #needed;
+	/** @type {boolean} */ #hasEscapes;
+
+	/** @param {string} s */
+	static #tok(s) { return s.charCodeAt(0); }
+
+	#activeTextElement() { return lastElem(this.#styleStack) || this.#paragraph; };
+	#activeContainer() { return lastElem(this.#quoteStack) || this.#container; };
+
+	/** @param {number} offset @param {string[]} tags */
+	#pushStyle(offset, ...tags) {
+		this.#flushText(offset);
+
+		let index = 1000;
+
+		if (tags.length == 0) {
+			if (this.#styleStack.length === 0) return;
+			index = 0;
+		} else {
+			for (const tag of tags) {
+				const found = this.#styleStack.findIndex((e) => e.tagName === tag);
+				if (found === -1) continue;
+				index = Math.min(found, index);
+			}
+			if (index === 1000) {
+				for (const tag of tags) {
+					this.#styleStack.push(document.createElement(tag));
+				}
+				return;
+			}
+		}
+
+		for (let i = this.#styleStack.length - 1; i >= index; i--) {
+			const elem = this.#styleStack.pop() ?? never();
+			this.#activeTextElement().append(elem);
+		}
+	}
+
+	#flushText(offset = 0) {
+		const prevT = this.#t;
+		this.#t = this.#i;
+		if (prevT === this.#i - offset) return;
+		let text = this.#content.slice(prevT, this.#i - offset);
+		if (this.#hasEscapes) {
+			this.#hasEscapes = false;
+			text = text.replace(/\\(.)/g, "$1");
+		}
+		this.#activeTextElement().append(text);
+	}
+
+	#endParagraph(offset = 0) {
+		this.#flushText(offset);
+		if (this.#paragraph.childNodes.length === 0) return;
+		this.#pushStyle(0);
+		this.#activeContainer().append(this.#paragraph);
+		this.#paragraph = document.createElement('p');
+	}
+
+	#reset() {
+		this.#i = 0;
+		this.#t = 0;
+		this.#container = document.createElement('div');
+		this.#paragraph = document.createElement('p');
+		this.#quoteStack.length = 0;
+		this.#styleStack.length = 0;
+		this.#content = '';
+		this.#needed = false;
+		this.#hasEscapes = false;
+	}
+
+	/** @returns {number | undefined} */
+	#advance() {
+		return this.#i < this.#content.length ?
+			this.#content.charCodeAt(this.#i++) : undefined;
+	}
+
+	/** @returns {number | undefined} */
+	#peek() {
+		return this.#i < this.#content.length ?
+			this.#content.charCodeAt(this.#i) : undefined;
+	}
+
+	/** @param {number} match @return {number} */
+	#countConsecutive(match) {
+		let count = 0;
+		while (this.#peek() === match) (count++, this.#advance());
+		return count;
+	}
+
+	/** @param {number} match @return {string} */
+	#tokenUntil(match) {
+		const textStart = this.#i;
+		for (let _i = this.#i; _i < this.#content.length; _i++) {
+			if (this.#advance() === match) break;
+		}
+		this.#t = this.#i;
+		return this.#content.slice(textStart, this.#i);
+	}
+
+	/** @param {Lexer} lexer */
+	#compileLexer(lexer) {
+		const regexString = Object.keys(lexer.patterns).map(name => {
+			const repr = lexer.patterns[name].toString();
+			return `(?<${name}>${repr.slice(1, repr.length - 1)})`
+		}).join('|');
+		lexer.compiled = new RegExp(regexString, "dg");
+	}
+
+	/** @param {Lexer} lexer @param {HTMLPreElement} pre @param {string} content */
+	#highlight(lexer, pre, content) {
+		if (!lexer.compiled) this.#compileLexer(lexer);
+		const re = lexer.compiled ?? never();
+
+		const highlightTheme = getHighlightTheme();
+
+		let lastIndex = 0, lastColor;
+		const flush = () => {
+			if (lastColor === undefined) {
+				pre.append(content.slice(lastIndex, match.start));
+			} else {
+				const span = document.createElement('span');
+				span.style.color = lastColor;
+				span.textContent = content.slice(lastIndex, match.start);
+				pre.append(span);
+			}
+		};
+
+		/** @type {TokenMatch} */ const match = { kind: '', start: 0, end: 0 };
+		for (let _i = 0; _i < content.length; _i++) {
+			const m = re.exec(content); if (m === null) break;
+			for (const kind in m['indices'].groups) {
+				const range = m['indices'].groups[kind];
+				if (!range) continue;
+				match.kind = kind;
+				match.start = range[0];
+				match.end = range[1];
+			}
+			lexer.finalizer?.(content, match);
+			const color = highlightTheme[match.kind];
+			if (lastColor !== color) {
+				flush();
+				lastColor = color;
+				lastIndex = match.start;
+			}
+			console.log(match, content.slice(match.start, match.end));
+			re.lastIndex = match.end;
+		}
+
+		match.start = match.end;
+		flush();
+	}
+
+	#parse() {
+		/** @type {boolean} */
+		let prevNewline = true, escapedTicks = false;
+		for (let _i = 0; _i < this.#content.length; _i++) {
+			const c = this.#advance(); if (!c) break;
+			var nextNewline = this.#newline == c;
+			var needed = true;
+			switch (true) {
+				case this.#backclash == c: {
+					this.#hasEscapes = true;
+					this.#advance();
+				} break;
+				case this.#hash == c && prevNewline: {
+					const headingLevel =
+						Math.min(this.#countConsecutive(this.#hash) + 1, 6);
+					const heading = document.createElement(`h${headingLevel}`);
+
+					heading.textContent = this.#tokenUntil(this.#newline);
+					this.#activeContainer().append(heading);
+					nextNewline = true;
+				} break;
+				case nextNewline && prevNewline: {
+					this.#endParagraph();
+				} break;
+				case this.#star == c: {
+					const count = this.#countConsecutive(this.#star) + 1;
+					if (count > 3) needed = false;
+					switch (count) {
+						case 1: this.#pushStyle(count, 'EM'); break;
+						case 2: this.#pushStyle(count, 'STRONG'); break;
+						case 3: this.#pushStyle(count, 'EM', 'STRONG'); break;
+					}
+				} break;
+				case this.#tilde == c: {
+					const count = this.#countConsecutive(this.#tilde) + 1;
+					if (count < 3) this.#pushStyle(count, 'DEL');
+				} break;
+				case this.#tick == c: {
+					const count = this.#countConsecutive(this.#tick) + 1;
+					switch (count) {
+						case 1: {
+							if (!escapedTicks) this.#pushStyle(count, 'CODE');
+						} break;
+						case 2: {
+							escapedTicks = !escapedTicks;
+							this.#pushStyle(count, 'CODE');
+						} break;
+						case 3: {
+							this.#endParagraph(count);
+
+							const language = this.#tokenUntil(this.#newline).trim();
+
+							let index = this.#content.indexOf('```', this.#i);
+							if (index === -1) index = this.#content.length;
+							const pre = document.createElement('pre');
+							const content = this.#content.slice(this.#i, index);
+							if (languages[language]) {
+								this.#highlight(languages[language], pre, content);
+							} else pre.textContent = content;
+							this.#activeContainer().append(pre);
+
+							this.#i = index + 3;
+							this.#t = this.#i;
+						} break;
+					}
+				} break;
+				case this.#gt == c && prevNewline: {
+					const count = this.#countConsecutive(this.#gt) + 1;
+					this.#flushText(count);
+					for (let i = this.#quoteStack.length; i < count; i++)
+						this.#quoteStack.push(document.createElement('section'));
+					while (this.#quoteStack.length > count) {
+						const elem = this.#quoteStack.pop() ?? never();
+						this.#activeContainer().append(elem);
+					}
+					nextNewline = prevNewline;
+					this.#needed = true;
+					this.#t = this.#i;
+				} break;
+				default: needed = false;
+			}
+			prevNewline = nextNewline;
+			this.#needed ||= needed;
+		}
+
+		this.#endParagraph();
+	}
+
+	#normalize() {
+		if (this.#container.childElementCount == 1 && this.#container.children[0].tagName === "P") {
+			const p = this.#container.children[0];
+			this.#container.append(...p.childNodes);
+			p.remove();
+		}
+	}
+
+	/** @param {string} content @returns {HTMLDivElement | string} */
+	static render(content) {
+		const inst = MarkdownRenderer.#instance;
+		inst.#reset();
+		inst.#content = content;
+		inst.#parse();
+		inst.#normalize();
+		return inst.#needed ? inst.#container : content;
+	}
+}
+
 // ## DOM
 
 /** @template {HTMLElement} T @param {string} id @returns T */
@@ -88,25 +452,49 @@ async function loginHandler(elem) {
 
 /** @param {HTMLFormElement} elem */
 async function inviteUserHandler(elem) {
+	const pk = elem.elements['pubkey'].value;
+	const roles = /** @type {HTMLElement[]} */
+		([...getStaticElemById("selected-roles").children])
+			.map(e => e.dataset.id);
+	const server = await Server.current();
+	let resp = await fetch(`${server.host}/user/invite`, {
+		method: "POST",
+		headers: {
+			"Authorization": "Bearer " + await nextProof(server.hostname),
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify({ pk, roles }),
+	}).catch(e => e + "");
 
+	if (typeof resp === "string") return errorToast(resp);
+
+	switch (resp.status) {
+		case 200: toast("user invited", "success"); break;
+		case 409: errorToast("user already invited");
+		case 403: errorToast("you are not allowed to invite users");
+		default: unexpectedStatusToast(resp);
+	}
 }
 
 const addServerHint = getStaticElemById("add-server-hint"),
 	addServerPubkey = getStaticElemById("add-server-pubkey");
 /** @param {HTMLFormElement} elem */
 async function addServerHandler(elem) {
-	const url = new URL(elem.elements['url'].value);
-	const host = url.hostname;
+	const url = new URL(elem.elements['url'].value).origin;
+	const host = new URL(url).hostname;
 	const name = elem.elements['username'].value;
 
-	let resp = await fetch(`${url.toString()}user`,
+	let resp = await fetch(`${url}/user`,
 		{ headers: { "Authorization": "Bearer " + await nextProof(host) } })
 		.catch(e => e + "");
 
 	if (typeof resp === "string") return errorToast(resp);
 
 	switch (resp.status) {
-		case 200: return Server.select(url.toString());
+		case 200: {
+			toast("server recollected", "success");
+			return Server.select(url.toString());
+		}
 		case 401: errorToast("server fully rejected us, this might be because of incorrect server name");
 		case 403: { } break;
 		default: unexpectedStatusToast(resp);
@@ -122,7 +510,10 @@ async function addServerHandler(elem) {
 	});
 
 	switch (resp.status) {
-		case 200: return Server.select(url.toString());
+		case 200: {
+			toast("invite used", "success");
+			return Server.select(url);
+		}
 		case 403: {
 			addServerPubkey.textContent = toHex(await pubkey())
 			addServerHint.hidden = false;
@@ -168,10 +559,51 @@ async function togglePoppup(id, hide) {
 		case "profile-settings": {
 			getStaticElemById(id + "-pubkey").textContent = toHex(await pubkey());
 		} break;
+		case "invite-user": await initInvieUserPoppup(); break;
 	}
 
 	getStaticElemById(id).hidden = hide;
 	poppup(hide ? "" : id);
+}
+
+async function initInvieUserPoppup() {
+	const server = await Server.current();
+	const unselectedRoles = getStaticElemById("unselected-roles");
+	const selectedRoles = getStaticElemById("selected-roles");
+
+	for (const ctnr of [selectedRoles, unselectedRoles]) ctnr.innerHTML = "";
+
+	for (const role of server.config.roles) {
+		const roleElem = document.createElement("div");
+		roleElem.onmousedown = () => {
+			const parent = roleElem.parentElement ?? never();
+			const moveTo = getStaticElemById(
+				parent.getAttribute("toggle-to")
+				?? never());
+			if (moveTo.childElementCount == 0) {
+				moveTo.innerHTML = "";
+			}
+			moveTo.append(roleElem);
+			if (parent.childElementCount == 0) {
+				parent.innerHTML = parent.getAttribute("placeholder") ?? never();
+			}
+		};
+		roleElem.dataset.id = role.id + "";
+		roleElem.textContent = role.name;
+		roleElem.style.color = invertColor(role.color);
+		roleElem.style.background = role.color;
+		unselectedRoles.appendChild(roleElem);
+	}
+
+	for (const ctnr of [selectedRoles, unselectedRoles])
+		if (ctnr.childElementCount == 0)
+			ctnr.innerHTML = ctnr.getAttribute("placeholder") ?? never();
+}
+
+/** @param {string} color */
+function invertColor(color) {
+	return "#" + (0xFFFFFF - parseInt(color.slice(1), 16))
+		.toString(16).padStart(6, "0");
 }
 
 /** @param {string} id */ const hidePoppup = (id) => togglePoppup(id, true);
@@ -183,7 +615,7 @@ async function render() {
 	getCrypto();
 	renderComponents(document.body);
 
-	if (!username() || !password()) {
+	if (username() === undefined || password() === undefined) {
 		selectPage("login");
 		return;
 	}
@@ -567,6 +999,11 @@ class Server {
 	isRoot() {
 		if (this.config.is_root !== undefined) return this.config.is_root;
 		return this.config.is_root = this.config.roots.includes(this.pubkey);
+	}
+
+	/** @param {UserPk} id @return {boolean} */
+	isUserRoot(id) {
+		return this.config.roots.includes(id);
 	}
 
 	static maxRolePerms = { can_manage_users: true };
@@ -1008,7 +1445,15 @@ function logout(message) {
 
 /** @param {string} message @return {never} */
 function errorToast(message) {
+	toast(message, "error");
+	throw new Error(message);
+}
+
+/** @param {string} message @param {"error" | "success"} type */
+function toast(message, type) {
 	const toast = document.createElement("div");
+	toast.style.background = `var(--${type})`;
+	if (type === "success") toast.style.color = 'black';
 	toast.classList.add("toast");
 	toast.textContent = message;
 
@@ -1021,8 +1466,6 @@ function errorToast(message) {
 	setTimeout(() => toast.style.transform += 'scale(0)', 5400);
 	setTimeout(() => toast.remove(), 6000);
 	document.body.prepend(toast);
-
-	throw new Error(message);
 }
 
 /** @param {Response} resp @return {never} */
@@ -1253,6 +1696,9 @@ class ChannelView extends ComponentBase {
 	/** @type {ChannelView} */ static inst;
 	static maxMessages = 120;
 
+	/** @type {Server} */
+	server;
+
 	/** @param {HTMLElement} elem */
 	constructor(elem) {
 		super(elem);
@@ -1300,19 +1746,19 @@ class ChannelView extends ComponentBase {
 
 		if (!server.messageAbort) {
 			while (this.scrollContainer.scrollTop < tolerance && !this.atTop) {
-				await this.loadMessages(server, chan, false);
+				await this.loadMessages(chan, false);
 			}
 
 			while (this.scrollBottom < tolerance && !this.atBottom) {
-				await this.loadMessages(server, chan, true);
+				await this.loadMessages(chan, true);
 			}
 		}
 	}
 
-	/** @param {Server} server @param {ChannelId} chan @param {boolean} bottom */
-	async loadMessages(server, chan, bottom) {
+	/** @param {ChannelId} chan @param {boolean} bottom */
+	async loadMessages(chan, bottom) {
 		const query = bottom ? "After" : "Before";
-		const messages = await server.getMessages(chan, query, this.getEdgeTimestamp(bottom));
+		const messages = await this.server.getMessages(chan, query, this.getEdgeTimestamp(bottom));
 		if (typeof messages === "string") errorToast(messages);
 		this.maxBatch = Math.max(this.maxBatch, messages.length);
 		const fin = this.maxBatch > messages.length || messages.length === 0;
@@ -1344,7 +1790,7 @@ class ChannelView extends ComponentBase {
 		let group = pickEdge(bottom, this.messageList);
 		for (const message of messages) {
 			if (!group || group.dataset.author !== message.author) {
-				group = this.createMessageGroup(message.author);
+				group = this.createMessageGroup(message.author, message.author_pk);
 				appendEdge(bottom, this.messageList, group);
 			}
 			appendEdge(bottom, getElem(group, "messages"), this.createMessage(message));
@@ -1366,11 +1812,18 @@ class ChannelView extends ComponentBase {
 		}
 	}
 
-	/** @param {string} author */
-	createMessageGroup(author) {
+	/** @param {string} author @param {UserPk} authorPk */
+	createMessageGroup(author, authorPk) {
 		const group = createComponent("channel-message-group") ?? never();
 		group.dataset.author = author;
-		getElem(group, "author").textContent = author;
+		const authorElem = getElem(group, "author");
+		if (author === "") {
+			authorElem.textContent = "(this user has empty username)";
+			authorElem.style.color = 'var(--error)';
+		} else authorElem.textContent = author;
+		if (this.server.isUserRoot(authorPk)) {
+			getElem(group, "root-icon").removeAttribute('hidden');
+		}
 		return group;
 	}
 
@@ -1378,7 +1831,17 @@ class ChannelView extends ComponentBase {
 	createMessage(message) {
 		const messageElem = createComponent("channel-message") ?? never();
 		messageElem.dataset.timestamp = message.timestamp + "";
-		messageElem.textContent = message.content;
+		const rendered = MarkdownRenderer.render(message.content);
+		const content = getElem(messageElem, "content");
+		content.innerHTML = '';
+		if (typeof rendered === 'string') {
+			content.textContent = rendered;
+		} else {
+			content.append(...rendered.childNodes);
+			content.classList.add("markdown");
+		}
+		getElem(messageElem, "timestamp").textContent =
+			new Date(message.timestamp * 1000).toLocaleString();
 		return messageElem;
 	}
 
@@ -1392,9 +1855,9 @@ class ChannelView extends ComponentBase {
 		this.atTop = false;
 		this.messageList.innerHTML = "";
 		this.name.textContent = "loading...";
+		this.server = await Server.current();
 
-		const server = await Server.current();
-		const chan = server.channelById(chanId);
+		const chan = this.server.channelById(chanId);
 		if (!chan) errorToast("channel was probably removed");
 
 		this.joinVoice.hidden = !chan.voice;
@@ -1404,7 +1867,7 @@ class ChannelView extends ComponentBase {
 		this.name.textContent = chan.name;
 
 		do {
-			await this.loadMessages(server, chan.id, false);
+			await this.loadMessages(chan.id, false);
 		} while (this.scrollContainer.scrollHeight === this.scrollContainer.clientHeight
 			&& !this.atTop);
 	}

@@ -349,6 +349,7 @@ struct Config {
 impl Config {
     fn sort(&mut self) {
         self.roles.sort_unstable_by_key(|r| r.id);
+        self.roots.sort_unstable();
         self.channels.sort_unstable_by_key(|c| c.id);
         self.channels.iter_mut().for_each(|c| c.roles.sort_unstable_by_key(|r| r.id));
     }
@@ -436,7 +437,7 @@ fn char_to_hex((i, c): (usize, char)) -> Result<u8, FromHexError> {
     })
 }
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug, Ord, PartialOrd)]
 struct Hex<const N: usize>([u8; N]);
 
 impl<const N: usize> std::str::FromStr for Hex<N> {
@@ -503,8 +504,8 @@ impl axum::response::IntoResponse for Error {
 
 impl From<sqlt::Error> for Error {
     fn from(e: sqlt::Error) -> Self {
-        if let sqlt::Error::SqliteFailure(err, _) = &e {
-            match err.code {
+        match &e {
+            sqlt::Error::SqliteFailure(err, _) => match err.code {
                 sqlt::ErrorCode::ConstraintViolation => return Error(crate::SC::CONFLICT),
                 sqlt::ErrorCode::Unknown
                     if let Ok(sc) = crate::SC::from_u16(err.extended_code as _) =>
@@ -512,7 +513,11 @@ impl From<sqlt::Error> for Error {
                     return Error(sc)
                 }
                 _ => {}
+            },
+            sqlt::Error::StatementChangedRows(0) => {
+                return Error(crate::SC::CONFLICT);
             }
+            _ => {}
         }
 
         eprintln!("uncategorized error: {e:#}");
@@ -702,12 +707,12 @@ mod messages {
     }
 
     pub async fn create(
-        user::Auth { id, user }: user::Auth,
+        user::Auth { id, is_root, user }: user::Auth,
         crate::StPat(state): crate::St,
         crate::Query(q): crate::Query<CreateQery>,
         content: String,
     ) -> Result<(), crate::Error> {
-        {
+        if !is_root {
             let perms = state
                 .config
                 .load()
@@ -775,7 +780,8 @@ mod user {
         get: "SELECT name, roles FROM users WHERE pk = ?",
         bump_nonce: "UPDATE users SET nonce = ?1
             WHERE pk = ?2 AND nonce < ?1 + 600 RETURNING name, roles",
-        invite: "INSERT INTO invited (pk, roles) VALUES (?, ?)",
+        invite: "INSERT INTO invited (pk, roles) SELECT * FROM (VALUES (?1, ?2))
+            WHERE NOT EXISTS (SELECT 1 FROM users WHERE pk = ?1)",
     }
 
     #[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
@@ -977,12 +983,17 @@ mod user {
     #[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
     pub struct Auth {
         pub id: crate::Hex<33>,
+        pub is_root: bool,
         pub user: User,
     }
 
     impl Auth {
         pub fn from_params(params: AuthParams, state: &crate::State) -> Result<Self, crate::Error> {
-            params.verify(&state.config.load().hostname)?;
+            let is_root = {
+                let config = state.config.load();
+                params.verify(&config.hostname)?;
+                config.roots.binary_search(&crate::Hex(params.pk)).is_ok()
+            };
 
             let user = crate::db::with(|db| {
                 db.users
@@ -993,7 +1004,7 @@ mod user {
                     .ok_or(status_err(crate::SC::FORBIDDEN))?
             })?;
 
-            Ok(Self { id: crate::Hex(params.pk), user })
+            Ok(Self { id: crate::Hex(params.pk), is_root, user })
         }
     }
 
@@ -1101,12 +1112,14 @@ mod user {
     }
 
     pub async fn invite(
-        Auth { user, .. }: Auth,
+        Auth { user, is_root, .. }: Auth,
         crate::StPat(state): crate::St,
         crate::Json(body): crate::Json<AddToken>,
     ) -> Result<(), crate::Error> {
-        let perms = state.config.load().role_perms(user.roles);
-        ensure!(perms.can_manage_users, FORBIDDEN);
+        if !is_root {
+            let perms = state.config.load().role_perms(user.roles);
+            ensure!(perms.can_manage_users, FORBIDDEN);
+        }
         crate::db::with(|db| db.users.invite.insert((body.pk, body.roles)))?;
         Ok(())
     }
@@ -1277,7 +1290,11 @@ mod voice {
                     .read()
                     .unwrap()
                     .iter()
-                    .map(|(&id, peer)| Auth { id: crate::Hex(id), user: peer.auth.user })
+                    .map(|(&id, peer)| Auth {
+                        id: crate::Hex(id),
+                        is_root: false,
+                        user: peer.auth.user,
+                    })
                     .collect::<Vec<_>>();
                 if socket
                     .send(Message::Text(to_message(SystemEvent::present {
@@ -1372,11 +1389,9 @@ mod voice {
     }
 
     pub async fn turn_auth(
-        Auth { user, id }: Auth,
+        Auth { user, is_root, .. }: Auth,
         crate::StPat(state): crate::St,
     ) -> Result<Json<TurnCreds>, crate::Error> {
-        let is_root = state.config.load().roots.contains(&id);
-
         let realm = if is_root {
             0
         } else {

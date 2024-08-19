@@ -14,7 +14,7 @@ Ordered by priority
     - [ ] Advanced content search (with access control)
 - [ ] Access control and rate-limiting trough roles
 - [ ] App configuration backups (server list, theming)
-- [ ] Markdown in messages
+- [x] Markdown in messages
 - [ ] Custom CSS/theming (I am unable to make beautiful things)
 - [ ] Server currency (monetization of whatever you want) (sweet dreams)
 - [ ] E2EE P2P conversations (would be kind of cool)

@@ -15,8 +15,18 @@ html[data-theme=dark] {
 	--success: #c2f353;
 	--warning: #cc931e;
 	--error: #d64e3c;
+	--info: #53A2EB;
 
 	--font: #EDEDED;
+}
+
+body {
+	--code-theme-keyword: var(--neutral);
+	--code-theme-punctation: color-mix(in srgb, white, black 30%);
+	--code-theme-string: var(--success);
+	--code-theme-number: var(--info);
+	--code-theme-comment: grey;
+	--code-theme-identifier: white;
 }
 
 * {
@@ -40,6 +50,23 @@ html[data-theme=dark] {
 	"Noto Color Emoji";
 
 	scrollbar-color: var(--secondary) var(--primary);
+}
+
+#invite-user {
+	.role-list {
+		display: flex;
+		gap: var(--small-gap);
+		justify-content: center;
+		flex-wrap: wrap;
+		border-radius: var(--small-gap);
+
+		>div {
+			cursor: pointer;
+			background: var(--secondary);
+			border-radius: var(--small-gap);
+			padding: calc(var(--small-gap) / 2);
+		}
+	}
 }
 
 button[comp=channel-select]:is(.selected, :hover:not(:active)) {
@@ -237,4 +264,37 @@ button.toggle-voice:hover:not(:active) {
 	margin: var(--small-gap);
 	max-width: 200px;
 	overflow-wrap: break-word;
+}
+
+.markdown {
+
+	h1,
+	h2,
+	h3,
+	h4,
+	h5,
+	h6 {
+		margin: 0;
+	}
+
+	p {
+		margin: var(--medium-gap) 0px;
+	}
+
+	code,
+	pre {
+		border-radius: 6px;
+		padding: 2px 4px;
+		font-family: monospace;
+		background: color-mix(in srgb, black, transparent 70%);
+	}
+
+	pre {
+		padding: var(--small-gap);
+		margin: var(--small-gap) 0px;
+
+		span {
+			font-family: monospace;
+		}
+	}
 }

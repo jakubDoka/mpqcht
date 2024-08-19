@@ -7,10 +7,10 @@
 hostname = "localhost"
 # public keys of highest privileged users that can edit this config remotely and in general don't need role permissions
 roots = [
-	"03c73b28ecc16df23eca8a66f4178a2ecfd6850f4e6dc135ce4e27791d4058301a",
-	"0345ae1fa1e046e264d8ac3d849df16ea6d9a8fd505cf320202c664f6dffce364e",
-	"03811f8505552278403036066b1ec110752ac80109a6caab5d050134fa01591ae7",
+	"039716e3ac965106a984801a50945124adf5fcba0c6e67f9eac6e3528a90a7e501",
+	"030c6c636d00c28890b310dd979610e5019d26c2fb97db230de3eb267f5899c35b",
 ]
+public = "client/public"
 	
 [[roles]]
 id = 0
