@@ -27,6 +27,7 @@ body {
 	--code-theme-number: var(--info);
 	--code-theme-comment: grey;
 	--code-theme-identifier: white;
+	--code-theme-type: color-mix(in srgb, var(--neutral), white 50%);
 }
 
 * {

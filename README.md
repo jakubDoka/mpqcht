@@ -8,6 +8,7 @@ The goal is to allow people to host curated online communities with minimal reso
 
 Ordered by priority
 
+- [x] Use no js dependencies
 - [ ] Unencrypted channels (message threads with assigned name)
     - [ ] Voice channels
     - [ ] Dynamic channels (channels under messages)
@@ -15,6 +16,7 @@ Ordered by priority
 - [ ] Access control and rate-limiting trough roles
 - [ ] App configuration backups (server list, theming)
 - [x] Markdown in messages
+    - [x] Sintax highligting in code blocks
 - [ ] Custom CSS/theming (I am unable to make beautiful things)
 - [ ] Server currency (monetization of whatever you want) (sweet dreams)
 - [ ] E2EE P2P conversations (would be kind of cool)

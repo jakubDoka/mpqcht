@@ -34,20 +34,9 @@ const re = /\d/g;
  * @property {number} end
  * */
 /// token is passed into this for post processing
-/** @callback TokenFinalizer
- * @param {string} source
- * @param {TokenMatch} match
+/** @callback TokenFinalizer @param {string} source @param {TokenMatch} match
  * @return {void}
  */
-const builtinPatterns = [
-	"ignored",
-	"identifier",
-	"keyword",
-	"number",
-	"string",
-	"punctation",
-	"comment",
-];
 /** @typedef {Object} Lexer
  * @property {RegExp} [compiled]
  * @property {Record<string, RegExp>} patterns
@@ -58,6 +47,7 @@ const languages = {
 		patterns: {
 			ignored: /\s+/,
 			keyword: /\b(as|break|const|continue|crate|else|enum|extern|false|fn|for|if|impl|in|let|loop|match|mod|move|mut|pub|ref|return|self|Self|static|struct|super|trait|true|type|unsafe|use|where|while|async|await|dyn)\b/,
+			type: /[A-Z][a-zA-Z0-9]*/,
 			identifier: /[a-zA-Z][a-zA-Z0-9]*/,
 			number: /[0-9]+/,
 			string: /"([^"]|\\")*"|'([^']|\\')*'/,
@@ -65,25 +55,17 @@ const languages = {
 			comment: /\/\/[^\n]*/,
 			punctation: /[?:^\+\-*&^%$#@!(){}\[\]\.,/:=><]/,
 		},
-		finalizer: (source, match) => {
+		finalizer: function(source, match) {
 			if (match.kind === "multilineComment") {
-				let depth = 1;
-				const slash = '/'.charCodeAt(0), star = '*'.charCodeAt(0);
-				while (depth) {
-					switch (source.charCodeAt(match.end)) {
-						case slash: if (source.charCodeAt(match.end + 1) === star) {
-							match.end++;
-							depth += 1;
-						} break;
-						case star: if (source.charCodeAt(match.end + 1) === slash) {
-							match.end++;
-							depth -= 1;
-						} break;
-					}
-					match.end++;
+				/** @type {RegExp} */
+				const matcher = window['multilineCommentMatch'] ??= /(\/\*)|(\*\/)/dg;
+				matcher.lastIndex = match.end;
+				let depth = 1; while (depth) {
+					const m = matcher.exec(source); if (!m) break;
+					if (m[1]) depth++; else depth--;
 				}
-				match.kind = "comment";
-				return;
+				match.end = matcher.lastIndex;
+				return match.kind = "comment";
 			}
 		},
 	},
@@ -93,14 +75,25 @@ const languages = {
 /** @returns {Record<string, string>} */
 function getHighlightTheme() {
 	if (theme) return theme;
-	const properties = document.body.computedStyleMap();
+
+	const pat = "--code-theme-";
 	/** @type { Record<string, string>} */ const records = {};
-	for (const [key, value] of properties) {
-		const pat = "--code-theme-";
-		if (!key.startsWith(pat)) continue;
-		records[key.slice(pat.length)] = value.toString();
+
+	if (document.body.computedStyleMap !== undefined) {
+		// surprisingly, the fallback does not work on chrome so we keep this
+		const properties = document.body.computedStyleMap();
+		for (const [key, value] of properties) {
+			if (!key.startsWith(pat)) continue;
+			records[key.slice(pat.length)] = value.toString();
+		}
+	} else {
+		const properties = getComputedStyle(document.body);
+		for (const key of properties) {
+			if (!key.startsWith(pat)) continue;
+			records[key.slice(pat.length)] = properties.getPropertyValue(key);
+		}
 	}
-	console.log(records);
+
 	return theme = records;
 }
 
@@ -223,10 +216,9 @@ class MarkdownRenderer {
 
 	/** @param {Lexer} lexer */
 	#compileLexer(lexer) {
-		const regexString = Object.keys(lexer.patterns).map(name => {
-			const repr = lexer.patterns[name].toString();
-			return `(?<${name}>${repr.slice(1, repr.length - 1)})`
-		}).join('|');
+		const regexString = Object.keys(lexer.patterns)
+			.map(name => `(?<${name}>${lexer.patterns[name].source})`)
+			.join('|');
 		lexer.compiled = new RegExp(regexString, "dg");
 	}
 
@@ -266,7 +258,6 @@ class MarkdownRenderer {
 				lastColor = color;
 				lastIndex = match.start;
 			}
-			console.log(match, content.slice(match.start, match.end));
 			re.lastIndex = match.end;
 		}
 
