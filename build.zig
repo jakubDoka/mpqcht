@@ -14,6 +14,20 @@ pub fn build(b: *std.Build) void {
     const no_wasm_opt = b.option(bool, "no-wasm-opt", "disable wasm-opt") orelse false;
     const target = b.option([]const u8, "server-target", "target triple of the server");
 
+    const optimize = b.standardOptimizeOption(.{});
+    const zig_target = b.standardTargetOptions(.{});
+
+    // TODO: we can reduce the sqlite library size by ommiting some features we dont need
+    const sqlite = b.dependency("sqlite", .{
+        .target = zig_target,
+        .optimize = optimize,
+    });
+    const zap = b.dependency("zap", .{
+        .target = zig_target,
+        .optimize = optimize,
+        .openssl = !no_tls, // set to true to enable TLS support
+    });
+
     buf.items.len = 0;
     buf.fixedWriter().print("{}", .{b.cache_root}) catch unreachable;
 
@@ -98,5 +112,22 @@ pub fn build(b: *std.Build) void {
     );
     install_server.step.dependOn(&cargo.step);
 
+    const server_options = b.addOptions();
+    server_options.addOption(bool, "tls", !no_tls);
+
+    const server = b.addExecutable(.{
+        .name = "zig-server",
+        .root_source_file = b.path("zig-server/main.zig"),
+        .target = zig_target,
+        .optimize = optimize,
+    });
+    server.root_module.addImport("zap", zap.module("zap"));
+    server.root_module.addImport("sqlite", sqlite.module("sqlite"));
+    server.root_module.addOptions("options", server_options);
+
+    b.installArtifact(server);
     b.getInstallStep().dependOn(&install_server.step);
+
+    const test_step = b.step("test", "stub for now");
+    test_step.dependOn(b.getInstallStep());
 }

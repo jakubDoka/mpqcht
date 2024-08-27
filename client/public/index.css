@@ -290,6 +290,12 @@ button.toggle-voice:hover:not(:active) {
 		background: color-mix(in srgb, black, transparent 70%);
 	}
 
+	section {
+		border-left: solid 5px color-mix(in srgb, white, transparent 70%);
+		padding: var(--small-gap);
+		background: color-mix(in srgb, black, transparent 70%);
+	}
+
 	pre {
 		padding: var(--small-gap);
 		margin: var(--small-gap) 0px;

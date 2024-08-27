@@ -25,51 +25,52 @@ function lastElem(list) {
 	return undefined;
 }
 
-const re = /\d/g;
+class LexerBase {
+	/** @typedef {Object} TokenMatch
+	 * @property {string} kind
+	 * @property {number} start
+	 * @property {number} end */
 
+	/** @type {RegExp} */ #compiled;
+	/** @type {Record<string, RegExp>} */ #patterns;
+	/** @type {TokenMatch} */ match = { kind: '', start: 0, end: 0 };
+	/** @type {RegExpExecArray} */ rawMatch;
 
-/** @typedef {Object} TokenMatch
- * @property {string} kind
- * @property {number} start
- * @property {number} end
- * */
-/// token is passed into this for post processing
-/** @callback TokenFinalizer @param {string} source @param {TokenMatch} match
- * @return {void}
- */
-/** @typedef {Object} Lexer
- * @property {RegExp} [compiled]
- * @property {Record<string, RegExp>} patterns
- * @property {TokenFinalizer} [finalizer] */
-/** @type {Record<string, Lexer>} */
-const languages = {
-	rs: {
-		patterns: {
-			ignored: /\s+/,
-			keyword: /\b(as|break|const|continue|crate|else|enum|extern|false|fn|for|if|impl|in|let|loop|match|mod|move|mut|pub|ref|return|self|Self|static|struct|super|trait|true|type|unsafe|use|where|while|async|await|dyn)\b/,
-			type: /[A-Z][a-zA-Z0-9]*/,
-			identifier: /[a-zA-Z][a-zA-Z0-9]*/,
-			number: /[0-9]+/,
-			string: /"([^"]|\\")*"|'([^']|\\')*'/,
-			multilineComment: /\/\*/,
-			comment: /\/\/[^\n]*/,
-			punctation: /[?:^\+\-*&^%$#@!(){}\[\]\.,/:=><]/,
-		},
-		finalizer: function(source, match) {
-			if (match.kind === "multilineComment") {
-				/** @type {RegExp} */
-				const matcher = window['multilineCommentMatch'] ??= /(\/\*)|(\*\/)/dg;
-				matcher.lastIndex = match.end;
-				let depth = 1; while (depth) {
-					const m = matcher.exec(source); if (!m) break;
-					if (m[1]) depth++; else depth--;
-				}
-				match.end = matcher.lastIndex;
-				return match.kind = "comment";
+	/** @param {Record<string, RegExp>} patterns */
+	constructor(patterns) {
+		this.#patterns = patterns;
+	}
+
+	/** @returns {RegExp} */
+	#getLexer() {
+		return this.#compiled ??= new RegExp(Object.keys(this.#patterns)
+			.map(name => `(?<${name}>${this.#patterns[name].source})`)
+			.join('|'), "dgm");
+	}
+
+	/** @param {string} source @return {void} */
+	postProcessToken(source) { console.error(source) }
+
+	/** @param {string} source */
+	execute(source) {
+		const re = this.#getLexer();
+		for (let _i = 0; _i < source.length; _i++) {
+			const m = re.exec(source); if (m === null) break;
+			this.rawMatch = m;
+			for (const kind in m['indices'].groups) {
+				if (!this.#patterns[kind]) continue;
+				const range = m['indices'].groups[kind];
+				if (!range) continue;
+				this.match.kind = kind;
+				this.match.start = range[0];
+				this.match.end = range[1];
 			}
-		},
-	},
-};
+			this.postProcessToken(source);
+			re.lastIndex = this.match.end;
+		}
+	}
+
+}
 
 /** @type {Record<string, string>} */ let theme;
 /** @returns {Record<string, string>} */
@@ -97,18 +98,115 @@ function getHighlightTheme() {
 	return theme = records;
 }
 
-class MarkdownRenderer {
+class Highlighter extends LexerBase {
+	/** @type {HTMLPreElement} */ #pre;
+	/** @type {string | undefined} */ #lastColor;
+	/** @type {number} */ #lastIndex;
+
+	/** @param {string} source @return {void} */
+	flush(source) {
+		const str = source.slice(this.#lastIndex, this.match.start);
+		if (this.#lastColor === undefined) {
+			this.#pre.append(str);
+		} else {
+			const span = document.createElement('span');
+			span.style.color = this.#lastColor;
+			span.textContent = str;
+			this.#pre.append(span);
+		}
+	}
+
+	/** @param {string} source @return {void} */
+	postProcessToken(source) {
+		const color = getHighlightTheme()[this.match.kind];
+		if (this.#lastColor !== color) {
+			this.flush(source);
+			this.#lastColor = color;
+			this.#lastIndex = this.match.start;
+		}
+	}
+
+	/** @param {HTMLPreElement} pre @param {string} content */
+	highlight(pre, content) {
+		this.#pre = pre;
+		this.#lastColor = undefined;
+		this.#lastIndex = 0;
+
+		this.execute(content);
+		this.match.start = this.match.end;
+		this.flush(content);
+	}
+}
+
+class Rs extends Highlighter {
+	constructor() {
+		super({
+			ignored: /\s+/,
+			keyword: /\b(as|break|const|continue|crate|else|enum|extern|false|fn|for|if|impl|in|let|loop|match|mod|move|mut|pub|ref|return|self|Self|static|struct|super|trait|true|type|unsafe|use|where|while|async|await|dyn)\b/,
+			type: /[A-Z][a-zA-Z0-9]*/,
+			identifier: /[a-zA-Z][a-zA-Z0-9]*/,
+			number: /[0-9]+/,
+			string: /"([^"]|\\")*"|'([^']|\\')*'/,
+			multilineComment: /\/\*/,
+			comment: /\/\/[^\n]*/,
+			punctation: /[?:^\+\-*&^%$#@!(){}\[\]\.,/:=><]/,
+		});
+	}
+
+	/** @param {string} source */
+	postProcessToken(source) {
+		if (this.match.kind === "multilineComment") {
+			/** @type {RegExp} */
+			const matcher = window['multilineCommentMatch'] ??= /(\/\*)|(\*\/)/dg;
+			matcher.lastIndex = this.match.end;
+			let depth = 1; while (depth) {
+				const m = matcher.exec(source); if (!m) break;
+				if (m[1]) depth++; else depth--;
+			}
+			this.match.end = matcher.lastIndex;
+			this.match.kind = "comment";
+		}
+		super.postProcessToken(source);
+	}
+}
+
+/** @typedef {Object} OgData
+ * @property {string} [image]
+ * @property {string} description
+ * @property {string} [site_name]
+ * @property {string} title */
+
+/** @param {string} url @returns {Promise<OgData | string>} */
+async function extractPreview(url) {
+	const resp = await fetch("https://cors-anywhere.herokuapp.com/" + url);
+	if (resp.status !== 200) return (await
+		resp.text().catch(() => undefined)) || resp.statusText;
+	const html = new DOMParser().parseFromString(await resp.text(), 'text/html');
+
+	const result = {};
+	for (const elem of html.querySelectorAll("meta[property][content]")) {
+		const property = elem.getAttribute("property") ?? never();
+		const content = elem.getAttribute("property") ?? never();
+		if (!property.startsWith("og:")) continue;
+		result[property.slice(3)] = content;
+	}
+
+	if (!result.description) return "missing description";
+	if (!result.title) return "missing title";
+
+	return /** @type {OgData} */ (result);
+}
+
+
+/** @type {Record<string, Highlighter>} */
+const languages = {
+	rs: new Rs(),
+};
+
+const markdonwEscapePat = /\\([\\\`\*\_\{\}\[\]\<\>\(\)\#\+\-\.\!\|])/g;
+class MarkdownRenderer extends LexerBase {
 	static #instance = new MarkdownRenderer();
 
-	#hash = MarkdownRenderer.#tok('#');
-	#star = MarkdownRenderer.#tok('*');
-	#tilde = MarkdownRenderer.#tok('~');
-	#tick = MarkdownRenderer.#tok('`');
-	#newline = MarkdownRenderer.#tok('\n');
-	#gt = MarkdownRenderer.#tok('>');
-	#backclash = MarkdownRenderer.#tok('\\');
-
-	/** @type {number} */ #i;
 	/** @type {number} */ #t;
 	/** @type {HTMLDivElement} */ #container;
 	/** @type {HTMLParagraphElement} */ #paragraph;
@@ -117,16 +215,43 @@ class MarkdownRenderer {
 	/** @type {string} */ #content;
 	/** @type {boolean} */ #needed;
 	/** @type {boolean} */ #hasEscapes;
+	/** @type {boolean} */ #tickEscape;
 
-	/** @param {string} s */
-	static #tok(s) { return s.charCodeAt(0); }
 
-	#activeTextElement() { return lastElem(this.#styleStack) || this.#paragraph; };
-	#activeContainer() { return lastElem(this.#quoteStack) || this.#container; };
+	constructor() {
+		// TODO: bullet points
+		// TODO: hr
+		// TODO: link reference
+		// TODO: images
+		// TODO: fix the terrible hack
+		super({
+			escape: markdonwEscapePat,
+			heading: /(?<headingNl>^>*)\s*(?<headingLevel>#{1,6}) (?<headingContent>[^\n]+)/,
+			codeBlock: /(?<codeBlockNl>^>*)\s*`{3}(?<codeBlockId>[a-z]+)/,
+			quote: /^>+/,
+			paragraphSep: /\s*(\n\s*){2,}|\s*\n(?<paragraphSepQuote>>+)\s*\n/,
+			namedUrl: /\[(?<namedUrlName>[^\]]+)\]\s*\((?<namedUrlContent>[^)]+)\)/,
+			url: /<?(?<urlContent>[a-z]{1,10}:\/\/[^)\s]+)>?/,
+			italic: /\*{1,3}|_{1,3}/,
+			del: /~{1,2}/,
+			code: /`{1,2}/,
+		});
+	}
 
-	/** @param {number} offset @param {string[]} tags */
-	#pushStyle(offset, ...tags) {
-		this.#flushText(offset);
+	#flushText2() {
+		const prevT = this.#t; this.#t = this.match.end;
+		if (prevT === this.match.start) return;
+		let text = this.#content.slice(prevT, this.match.start);
+		if (this.#hasEscapes) {
+			this.#hasEscapes = false;
+			text = text.replace(markdonwEscapePat, "$1");
+		}
+		this.#activeTextElement().append(text);
+	}
+
+	/** @param {string[]} tags */
+	#pushStyle2(...tags) {
+		this.#flushText2();
 
 		let index = 1000;
 
@@ -153,28 +278,116 @@ class MarkdownRenderer {
 		}
 	}
 
-	#flushText(offset = 0) {
-		const prevT = this.#t;
-		this.#t = this.#i;
-		if (prevT === this.#i - offset) return;
-		let text = this.#content.slice(prevT, this.#i - offset);
-		if (this.#hasEscapes) {
-			this.#hasEscapes = false;
-			text = text.replace(/\\(.)/g, "$1");
+	#endParagraph2(handleQuote = false) {
+		this.#flushText2();
+		if (this.#paragraph.childNodes.length !== 0) {
+			this.#pushStyle2();
+			this.#activeContainer().append(this.#paragraph);
+			this.#paragraph = document.createElement('p');
 		}
-		this.#activeTextElement().append(text);
+		if (handleQuote) {
+			const depth = this.rawMatch.groups?.[this.match.kind + "Nl"]?.length ?? 0;
+			this.#setQuoteDepth(depth);
+		}
 	}
 
-	#endParagraph(offset = 0) {
-		this.#flushText(offset);
-		if (this.#paragraph.childNodes.length === 0) return;
-		this.#pushStyle(0);
-		this.#activeContainer().append(this.#paragraph);
-		this.#paragraph = document.createElement('p');
+	/** @param {string} content @param {string} name  */
+	#pushLink(content, name) {
+		try { new URL(content) } catch (_) { return };
+
+		const a = document.createElement('a');
+		a.href = content;
+		a.target = "_blank";
+		a.referrerPolicy = "noopener noreferrer";
+		a.textContent = name;
+
+		this.#activeTextElement().append(a);
+		this.#t = this.match.end;
 	}
+
+	/** @param {number} depth  */
+	#setQuoteDepth(depth) {
+		if (depth > this.#quoteStack.length) this.#endParagraph2();
+		for (let i = this.#quoteStack.length; i < depth; i++)
+			this.#quoteStack.push(document.createElement('section'));
+		while (this.#quoteStack.length > depth) {
+			this.#normalize();
+			const elem = this.#quoteStack.pop() ?? never();
+			this.#activeContainer().append(elem);
+		}
+	}
+
+	/** @param {string} source @return {void} */
+	postProcessToken(source) {
+		this.#needed = true;
+		switch (this.match.kind) {
+			case "escape": {
+				this.#hasEscapes = true;
+			} break;
+			case "heading": {
+				this.#endParagraph2(true);
+				const headingLevel = this.rawMatch.groups?.headingLevel.length;
+				const heading = document.createElement(`h${headingLevel}`);
+				heading.textContent = this.rawMatch.groups?.headingContent ?? "";
+				this.#activeContainer().append(heading);
+			} break;
+			case "codeBlock": {
+				this.#endParagraph2(true);
+				const language = this.rawMatch.groups?.codeBlockId ?? "";
+
+				let index = source.indexOf('```', this.match.end);
+				if (index === -1) index = source.length;
+				const content = source.slice(this.match.end, index);
+
+				const pre = document.createElement('pre');
+				if (languages[language]) {
+					languages[language].highlight(pre, content.trim());
+				} else pre.textContent = content;
+				this.#activeContainer().append(pre);
+
+				this.match.end = this.#t = Math.min(index + 3, source.length);
+			} break;
+			case "quote": {
+				this.#flushText2();
+				this.#setQuoteDepth(this.match.end - this.match.start);
+				this.#t = this.match.end;
+			} break;
+			case "url": {
+				const content = this.rawMatch.groups?.urlContent ?? "";
+				this.#pushLink(content, content);
+			} break;
+			case "namedUrl": {
+				const content = this.rawMatch.groups?.namedUrlContent ?? "";
+				const name = this.rawMatch.groups?.namedUrlName ?? "";
+				this.#pushLink(content, name);
+			} break;
+			case "paragraphSep": {
+				this.#endParagraph2();
+				const count = this.rawMatch.groups?.paragraphSepQuote?.length ?? 0;
+				this.#setQuoteDepth(count);
+			} break;
+			case "italic": switch (this.match.end - this.match.start) {
+				case 1: this.#pushStyle2('EM'); break;
+				case 2: this.#pushStyle2('STRONG'); break;
+				case 3: this.#pushStyle2('EM', 'STRONG'); break;
+			} break;
+			case "del": {
+				this.#pushStyle2('DEL');
+			} break;
+			case "code": {
+				if (this.match.end - this.match.start === 2) {
+					this.#tickEscape = !this.#tickEscape;
+				} else if (this.#tickEscape) break;
+				this.#pushStyle2('CODE');
+			} break;
+			default: console.error(this.match);
+		}
+	}
+
+	#activeTextElement() { return lastElem(this.#styleStack) || this.#paragraph; };
+	#activeContainer() { return lastElem(this.#quoteStack) || this.#container; };
 
 	#reset() {
-		this.#i = 0;
 		this.#t = 0;
 		this.#container = document.createElement('div');
 		this.#paragraph = document.createElement('p');
@@ -185,178 +398,16 @@ class MarkdownRenderer {
 		this.#hasEscapes = false;
 	}
 
-	/** @returns {number | undefined} */
-	#advance() {
-		return this.#i < this.#content.length ?
-			this.#content.charCodeAt(this.#i++) : undefined;
-	}
-
-	/** @returns {number | undefined} */
-	#peek() {
-		return this.#i < this.#content.length ?
-			this.#content.charCodeAt(this.#i) : undefined;
-	}
-
-	/** @param {number} match @return {number} */
-	#countConsecutive(match) {
-		let count = 0;
-		while (this.#peek() === match) (count++, this.#advance());
-		return count;
-	}
-
-	/** @param {number} match @return {string} */
-	#tokenUntil(match) {
-		const textStart = this.#i;
-		for (let _i = this.#i; _i < this.#content.length; _i++) {
-			if (this.#advance() === match) break;
-		}
-		this.#t = this.#i;
-		return this.#content.slice(textStart, this.#i);
-	}
-
-	/** @param {Lexer} lexer */
-	#compileLexer(lexer) {
-		const regexString = Object.keys(lexer.patterns)
-			.map(name => `(?<${name}>${lexer.patterns[name].source})`)
-			.join('|');
-		lexer.compiled = new RegExp(regexString, "dg");
-	}
-
-	/** @param {Lexer} lexer @param {HTMLPreElement} pre @param {string} content */
-	#highlight(lexer, pre, content) {
-		if (!lexer.compiled) this.#compileLexer(lexer);
-		const re = lexer.compiled ?? never();
-
-		const highlightTheme = getHighlightTheme();
-
-		let lastIndex = 0, lastColor;
-		const flush = () => {
-			if (lastColor === undefined) {
-				pre.append(content.slice(lastIndex, match.start));
-			} else {
-				const span = document.createElement('span');
-				span.style.color = lastColor;
-				span.textContent = content.slice(lastIndex, match.start);
-				pre.append(span);
-			}
-		};
-
-		/** @type {TokenMatch} */ const match = { kind: '', start: 0, end: 0 };
-		for (let _i = 0; _i < content.length; _i++) {
-			const m = re.exec(content); if (m === null) break;
-			for (const kind in m['indices'].groups) {
-				const range = m['indices'].groups[kind];
-				if (!range) continue;
-				match.kind = kind;
-				match.start = range[0];
-				match.end = range[1];
-			}
-			lexer.finalizer?.(content, match);
-			const color = highlightTheme[match.kind];
-			if (lastColor !== color) {
-				flush();
-				lastColor = color;
-				lastIndex = match.start;
-			}
-			re.lastIndex = match.end;
-		}
-
-		match.start = match.end;
-		flush();
-	}
-
-	#parse() {
-		/** @type {boolean} */
-		let prevNewline = true, escapedTicks = false;
-		for (let _i = 0; _i < this.#content.length; _i++) {
-			const c = this.#advance(); if (!c) break;
-			var nextNewline = this.#newline == c;
-			var needed = true;
-			switch (true) {
-				case this.#backclash == c: {
-					this.#hasEscapes = true;
-					this.#advance();
-				} break;
-				case this.#hash == c && prevNewline: {
-					const headingLevel =
-						Math.min(this.#countConsecutive(this.#hash) + 1, 6);
-					const heading = document.createElement(`h${headingLevel}`);
-
-					heading.textContent = this.#tokenUntil(this.#newline);
-					this.#activeContainer().append(heading);
-					nextNewline = true;
-				} break;
-				case nextNewline && prevNewline: {
-					this.#endParagraph();
-				} break;
-				case this.#star == c: {
-					const count = this.#countConsecutive(this.#star) + 1;
-					if (count > 3) needed = false;
-					switch (count) {
-						case 1: this.#pushStyle(count, 'EM'); break;
-						case 2: this.#pushStyle(count, 'STRONG'); break;
-						case 3: this.#pushStyle(count, 'EM', 'STRONG'); break;
-					}
-				} break;
-				case this.#tilde == c: {
-					const count = this.#countConsecutive(this.#tilde) + 1;
-					if (count < 3) this.#pushStyle(count, 'DEL');
-				} break;
-				case this.#tick == c: {
-					const count = this.#countConsecutive(this.#tick) + 1;
-					switch (count) {
-						case 1: {
-							if (!escapedTicks) this.#pushStyle(count, 'CODE');
-						} break;
-						case 2: {
-							escapedTicks = !escapedTicks;
-							this.#pushStyle(count, 'CODE');
-						} break;
-						case 3: {
-							this.#endParagraph(count);
-
-							const language = this.#tokenUntil(this.#newline).trim();
-
-							let index = this.#content.indexOf('```', this.#i);
-							if (index === -1) index = this.#content.length;
-							const pre = document.createElement('pre');
-							const content = this.#content.slice(this.#i, index);
-							if (languages[language]) {
-								this.#highlight(languages[language], pre, content);
-							} else pre.textContent = content;
-							this.#activeContainer().append(pre);
-
-							this.#i = index + 3;
-							this.#t = this.#i;
-						} break;
-					}
-				} break;
-				case this.#gt == c && prevNewline: {
-					const count = this.#countConsecutive(this.#gt) + 1;
-					this.#flushText(count);
-					for (let i = this.#quoteStack.length; i < count; i++)
-						this.#quoteStack.push(document.createElement('section'));
-					while (this.#quoteStack.length > count) {
-						const elem = this.#quoteStack.pop() ?? never();
-						this.#activeContainer().append(elem);
-					}
-					nextNewline = prevNewline;
-					this.#needed = true;
-					this.#t = this.#i;
-				} break;
-				default: needed = false;
-			}
-			prevNewline = nextNewline;
-			this.#needed ||= needed;
-		}
-
-		this.#endParagraph();
+	#parse2() {
+		this.execute(this.#content);
 	}
 
 	#normalize() {
-		if (this.#container.childElementCount == 1 && this.#container.children[0].tagName === "P") {
-			const p = this.#container.children[0];
-			this.#container.append(...p.childNodes);
+		const container = this.#activeContainer();
+		if (container.childElementCount == 1 &&
+			container.children[0].tagName === "P") {
+			const p = container.children[0];
+			container.append(...p.childNodes);
 			p.remove();
 		}
 	}
@@ -366,7 +417,10 @@ class MarkdownRenderer {
 		const inst = MarkdownRenderer.#instance;
 		inst.#reset();
 		inst.#content = content;
-		inst.#parse();
+		inst.#parse2();
+		inst.match.start = inst.match.end = content.length;
+		inst.#endParagraph2();
+		inst.#setQuoteDepth(0);
 		inst.#normalize();
 		return inst.#needed ? inst.#container : content;
 	}
